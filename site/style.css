@@ -1,0 +1,180 @@
+/* Shared styles for the DesktopTasks site.
+   Palette matches the widget itself (source/dashboard.html), so the site
+   and the app read as one thing. No external fonts or frameworks: the
+   whole site is three HTML files and this. */
+
+:root {
+  --surface-0:      #ffffff;
+  --surface-1:      #f3f4f6;
+  --border:         #e5e7eb;
+  --text-primary:   #1f2937;
+  --text-secondary: #374151;
+  --text-muted:     #6b7280;
+  --accent:         #2f84fc;  /* the logo's blue */
+  --accent-ink:     #ffffff;
+  --radius:         14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-0:      #1d2128;
+    --surface-1:      #23272f;
+    --border:         #3e4651;
+    --text-primary:   #f2f4f7;
+    --text-secondary: #d5dbe3;
+    --text-muted:     #a2abb8;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font: 16px/1.65 "Segoe UI Variable Text", "Segoe UI", system-ui,
+        -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 20px 64px;
+}
+
+/* ------------------------------------------------------------ header */
+.site-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+.site-head img { width: 52px; height: 52px; border-radius: 12px; }
+.site-head h1 { margin: 0; font-size: 28px; letter-spacing: -0.02em; }
+
+.tagline {
+  margin: 0 0 28px;
+  color: var(--text-muted);
+  font-size: 17px;
+}
+
+/* -------------------------------------------------------------- hero */
+.hero {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  margin: 28px 0;
+}
+.hero p:first-child { margin-top: 0; }
+.hero p:last-child { margin-bottom: 0; }
+
+.shot {
+  display: block;
+  max-width: 340px;
+  width: 100%;
+  margin: 24px auto;
+  border-radius: var(--radius);
+}
+
+/* ------------------------------------------------------------ bits */
+h2 {
+  margin: 36px 0 12px;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+h3 { margin: 26px 0 8px; font-size: 16px; }
+
+p, li { color: var(--text-secondary); }
+ul { padding-left: 22px; }
+li { margin: 5px 0; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font: 13.5px/1.4 "Cascadia Code", Consolas, monospace;
+}
+
+pre {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+pre code { background: none; border: 0; padding: 0; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 15px;
+}
+th, td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+th { color: var(--text-primary); font-weight: 600; }
+td { color: var(--text-secondary); }
+
+.btn {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 10px 18px;
+  border-radius: 9px;
+  font-weight: 600;
+  margin: 4px 8px 4px 0;
+}
+.btn:hover { text-decoration: none; filter: brightness(1.08); }
+.btn.secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+
+.note {
+  border-left: 3px solid var(--accent);
+  background: var(--surface-1);
+  border-radius: 0 10px 10px 0;
+  padding: 12px 16px;
+  margin: 20px 0;
+  font-size: 15px;
+}
+
+.draft {
+  border-left: 3px solid #d97706;
+  background: var(--surface-1);
+  border-radius: 0 10px 10px 0;
+  padding: 12px 16px;
+  margin: 0 0 28px;
+  font-size: 15px;
+}
+
+.meta { color: var(--text-muted); font-size: 14px; margin: 0 0 24px; }
+
+/* ------------------------------------------------------------ footer */
+footer {
+  margin-top: 52px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+footer a { margin-right: 14px; }
+footer .fine { display: block; margin-top: 12px; }
+
+@media (max-width: 520px) {
+  .wrap { padding: 32px 16px 48px; }
+  .site-head h1 { font-size: 23px; }
+}

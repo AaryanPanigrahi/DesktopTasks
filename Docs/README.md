@@ -971,7 +971,103 @@ who are not on the test-user list sign in. Verified against Google's
 developer documentation in October 2026; the rules do change, so check the
 links before relying on this.
 
+### Step 0 — "Missing domain: github.com"
+
+If the console shows **Missing domain: github.com** under Authorised
+domains, that is **not** a verification failure. It means a URL you entered
+on the branding page — the home page, privacy policy or terms — points at
+`github.com`, and every domain used anywhere in the project has to be
+pre-registered in the Authorised domains list first.
+
+**The fix:** add `github.com` to Authorised domains. Enter the bare
+top-level domain only — no `https://`, no `www.`, no path:
+
+```
+github.com
+```
+
+Once a domain is registered you may use any of its subdomains and any page
+under it, so one entry covers every `github.com/...` URL. Google's own
+guidance is to **add the authorised domain before** you add the home page,
+privacy policy, terms or redirect URIs — doing it the other way round is
+exactly what produces this error. There is a limit of **ten** authorised
+domains per project.
+
+That clears the error and is fine while the app is in **Testing**.
+Search Console verification of those domains is only required "if your app
+needs to go through verification".
+
+**It will not survive verification, though**, which is the next section.
+
 ### Step 1 — a domain you own
+
+**Short answer: yes, verification needs a domain you own. `github.com` can
+never work for it.**
+
+Not because Google dislikes GitHub, but because of *how* domains are
+verified. Search Console requires a **Domain property**, verified at the
+**DNS level** by adding a TXT record to the domain's DNS configuration, and
+the verifying Google account must be an **owner of the Cloud project**. You
+cannot add a DNS record to `github.com` — GitHub controls it. The same
+applies to `github.io`, `vercel.app`, `netlify.app` and every other shared
+provider domain: Google's advice for these is to map the service to a
+subdomain of a domain you already own.
+
+So for verification, this is the real blocker, and it gates everything
+else. Google requires the app's **home page**, **privacy policy** and
+**terms of service** to be live web pages, and the privacy policy must be
+**hosted on the same domain as the home page**. The Markdown drafts in this
+folder cannot be the URLs you submit — they have to be published.
+
+- The home page must be **publicly accessible** (not behind a login),
+  clearly **relevant to the app under review**, and **not** a Play Store
+  listing or a social-media profile. A GitHub repository page is a weak
+  home page for the same reason: it is someone else's domain and reads as
+  a code listing rather than as the app's own site.
+- You must **verify ownership of every authorised domain in Google Search
+  Console**, as a Domain property, from an account that owns the Cloud
+  project.
+
+**The cheap path**, since hosting is not the expensive part:
+
+1. Buy a domain (roughly £10–£15 / \$10–\$15 a year).
+2. Host the three pages free on **GitHub Pages**, pointed at that domain as
+   a custom domain. You keep using GitHub; the URLs just carry your name.
+3. In Search Console, add it as a **Domain property** and verify with the
+   DNS TXT record.
+4. Put the domain in Authorised domains, and point the home page, privacy
+   policy and terms URIs at it.
+
+Suggested layout once you have `example.com`:
+
+| Page | Content |
+|---|---|
+| `https://example.com/` | What DesktopTasks is, a screenshot, a download link. This is the "home page". |
+| `https://example.com/privacy` | `Docs/PRIVACY.md`, published as HTML |
+| `https://example.com/terms` | `Docs/TERMS.md`, published as HTML |
+
+Link the privacy policy and terms from the home page's footer — Google
+wants the policy "visible to users", not merely reachable by direct URL.
+
+### Do you actually need this?
+
+Only if you want the app **verified**. The three end states again, with
+what each one costs:
+
+| Goal | Domain needed? | What to do |
+|---|---|---|
+| Just you | **No** | Stay in Testing. Register `github.com` as above to clear the error. Accept the weekly reconnect. |
+| You and people you know | **Probably** | The console wants home page / privacy / terms URLs before it will let you publish to production. Those URLs need an authorised domain, but **not a verified one**, since you are not submitting for review. Try `github.com` first — it may well be accepted. |
+| A public release | **Yes** | Everything in Step 1. There is no way around DNS-level domain verification. |
+
+The middle row is the one worth testing before spending money: publishing
+to production **without** submitting for verification already fixes both
+problems that bite today — the 7-day token expiry and the test-user
+restriction — and it is not certain that the console demands a *verified*
+domain to do it. Try it with `github.com` registered; if the console lets
+you publish, you have what you need for nothing.
+
+
 
 This is the real blocker, and it gates almost everything else. Google
 requires the app's **home page**, **privacy policy** and **terms of
@@ -1000,6 +1096,38 @@ Suggested layout once you have `example.com`:
 
 Link the privacy policy and terms from the home page's footer — Google wants
 the policy "visible to users", not merely reachable by direct URL.
+
+### The site, in `site/`
+
+`site/` holds a small static site — `index.html`, `privacy.html`,
+`terms.html`, one stylesheet and the logo — published to GitHub Pages by
+`.github/workflows/pages.yml`. It lands at
+`https://aaryanpanigrahi.github.io/DesktopTasks/`.
+
+It is its own folder rather than the repo root or `/docs`: the root would
+put `index.html` beside the source tree, and `/docs` would collide with
+this repo's existing `Docs/`. GitHub paths are case-sensitive, so `Docs/`
+and `docs/` are different things, and relying on that distinction is a trap
+for whoever looks next.
+
+**What it is worth, and what it is not.** It gives the project a real home
+page, privacy policy and terms at URLs that are not a code listing — which
+is what the console asks for, and what publishing to production needs. It
+does **not** make verification possible, because `github.io` cannot be
+DNS-verified (see Step 1).
+
+**Moving it to a domain you own later** is a CNAME file in `site/`, a DNS
+record, and the custom-domain box in the repo's Pages settings. Nothing
+else changes, and that is the step that unlocks verification.
+
+**Deleting it** is two paths and nothing else:
+
+```
+git rm -r site .github/workflows/pages.yml
+```
+
+No code imports from it, nothing in `source/` references it, and the build
+does not touch it.
 
 ### Step 2 — fill in the drafts
 
@@ -1079,22 +1207,11 @@ fixes both of the problems that bite today** — the weekly reconnect and the
 test-user restriction. Verification only removes the warning screen and the
 user cap.
 
-### You may not need any of this
-
+Staying unverified is a legitimate end state, not a half-finished one.
 Google's own documentation says apps "used only by the developer and
 personally known users may skip verification and proceed through the
-unverified app screen". If DesktopTasks is for you and a handful of
-friends, publishing to production **unverified** is a legitimate end state:
-no domain strictly required for the user cap, though the console still
-wants the home page and policy URLs before it will let you publish at all.
-
-So the honest decision tree is:
-
-- **Just you?** Stay in Testing. Accept the weekly reconnect. Nothing to do.
-- **You and a few people you know?** You still need a domain and the two
-  pages to publish, but you can skip the demo video and the verification
-  submission. This is probably the right target.
-- **Public release?** Everything above, including the video.
+unverified app screen" — which is exactly what DesktopTasks is for now.
+See [Do you actually need this?](#do-you-actually-need-this) above.
 
 ### Nothing in the code changes
 

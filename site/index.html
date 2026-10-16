@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DesktopTasks — your Google Tasks, pinned to your desktop</title>
+<meta name="description" content="A small Windows widget that shows your Google Tasks on your desktop. Free, open source, and runs entirely on your own machine.">
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="site-head">
+    <img src="logo.png" alt="">
+    <h1>DesktopTasks</h1>
+  </header>
+  <p class="tagline">Your Google Tasks, pinned to the Windows desktop.</p>
+
+  <p>
+    DesktopTasks is a small widget for Windows that shows your Google Tasks
+    on your desktop — behind your icons, out of the way, always there. It
+    survives <strong>Win+D</strong>, never appears in the taskbar, and
+    resizes itself to fit however many tasks you have.
+  </p>
+
+  <p>
+    <a class="btn" href="https://github.com/AaryanPanigrahi/DesktopTasks">View on GitHub</a>
+    <a class="btn secondary" href="https://github.com/AaryanPanigrahi/DesktopTasks#readme">Read the docs</a>
+  </p>
+
+  <div class="hero">
+    <p>
+      <strong>It runs entirely on your own computer.</strong> There is no
+      server, no account to create, and no telemetry. Your tasks are read
+      from Google straight to your machine and stay there. We never receive
+      any of your data, because there is nowhere for it to go.
+    </p>
+  </div>
+
+  <h2>What it does</h2>
+  <ul>
+    <li>Shows every task list, with subtasks nested under their parents.</li>
+    <li>Calls out <strong>overdue</strong> and <strong>today</strong>, and
+      reads dates the way you would — <em>Today</em>, <em>Tomorrow</em>,
+      then <em>Oct 20</em>.</li>
+    <li>Shows task notes, and says <em>All clear</em> when a list is empty.</li>
+    <li>Pinned behind your desktop icons, with no taskbar or Alt+Tab entry.</li>
+    <li>Sizes itself to its content — no scrolling, no clipped last task.</li>
+    <li>A tray icon for <strong>Reload</strong>,
+      <strong>Reconnect&nbsp;Google</strong>, <strong>Restart</strong> and
+      <strong>Quit</strong>.</li>
+  </ul>
+
+  <h2>What it can see</h2>
+
+  <p>
+    DesktopTasks asks for exactly one permission —
+    <strong>read-only access to your Google Tasks</strong>
+    (<code>tasks.readonly</code>). It can read your task lists and the tasks
+    in them. It cannot change, complete or delete anything, and it cannot
+    touch any other part of your Google account: not your email, not your
+    files, not your calendar, not your contacts.
+  </p>
+
+  <p>
+    You can withdraw that access at any time from
+    <a href="https://myaccount.google.com/permissions">your Google account permissions</a>.
+    Full detail is in the <a href="privacy.html">privacy policy</a>.
+  </p>
+
+  <h2>Getting it</h2>
+
+  <p>
+    There is no packaged download yet. For now it runs from source, which
+    needs Python and a Google OAuth client of your own — the
+    <a href="https://github.com/AaryanPanigrahi/DesktopTasks#readme">README</a>
+    walks through both.
+  </p>
+
+<pre><code>git clone https://github.com/AaryanPanigrahi/DesktopTasks.git
+cd DesktopTasks
+cp config/config.example.json config/config.json
+python source/google_tasks_setup.py
+python source/desktoptasks.py</code></pre>
+
+  <div class="note">
+    <strong>Signing in shows an “unverified app” warning.</strong> That is
+    expected: this app has not been through Google's verification review.
+    Click <strong>Advanced → Go to DesktopTasks (unsafe)</strong>. You are
+    consenting on Google's own page, and nothing here ever sees your
+    password.
+  </div>
+
+  <h2>Open source</h2>
+
+  <p>
+    All of it, at
+    <a href="https://github.com/AaryanPanigrahi/DesktopTasks">github.com/AaryanPanigrahi/DesktopTasks</a>.
+    The fetcher and the sign-in flow are plain Python standard library, so
+    you can read exactly what it sends and where. Issues and pull requests
+    are welcome.
+  </p>
+
+  <footer>
+    <a href="privacy.html">Privacy Policy</a>
+    <a href="terms.html">Terms of Service</a>
+    <a href="https://github.com/AaryanPanigrahi/DesktopTasks">GitHub</a>
+    <span class="fine">
+      DesktopTasks is an independent project. It is not created, endorsed,
+      sponsored by, or affiliated with Google LLC. “Google” and “Google
+      Tasks” are trademarks of Google LLC.
+    </span>
+  </footer>
+
+</div>
+</body>
+</html>

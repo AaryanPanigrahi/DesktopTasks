@@ -1,0 +1,60 @@
+# Publishes site/ to GitHub Pages.
+#
+# The site is its own folder rather than the repo root or /docs. The root
+# would put index.html next to the source tree, and /docs would collide
+# with this repo's existing Docs/ folder -- GitHub paths are
+# case-sensitive, so Docs/ and docs/ are different things, and relying on
+# that distinction is a trap for whoever looks next.
+#
+# After the first run, set Settings > Pages > Source to "GitHub Actions"
+# (once, in the repo settings) and the site lands at
+# https://aaryanpanigrahi.github.io/DesktopTasks/.
+#
+# To move it to a domain you own later: add a CNAME file to site/ holding
+# the bare domain, point the DNS at GitHub Pages, and set the custom domain
+# in the same settings page. Nothing else here changes. That is also the
+# step that makes Google OAuth verification possible, which github.io
+# cannot satisfy -- see Docs/README.md, "Making the app public".
+
+name: Deploy site to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    # Only when the site actually changes. The source tree and the docs
+    # have no bearing on what gets published.
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  # So it can be published without waiting for a site change.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time. cancel-in-progress is false on purpose: a half
+# finished deploy that gets cancelled can leave the live site mid-swap,
+# and these runs take seconds, so queueing costs nothing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
