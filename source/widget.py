@@ -55,6 +55,7 @@ import pystray
 
 import google_tasks
 import google_tasks_setup
+import logo_cache
 import platform_win as native
 import serve
 from paths import (
@@ -215,16 +216,27 @@ class Api:
 
 
 def build_tray_image(accent):
-    """The tray icon: a dot in the accent colour.
+    """The tray icon: logo.png, falling back to a drawn circle.
 
-    DesktopCards resizes and caches a logo.png here. There is no mark for
-    this project, and the drawn circle is not a stand-in for one -- it
-    tracks the accent colour, which a bitmap cannot, so the tray dot
-    always matches the widget.
+    The circle was the original and had one real advantage -- generated
+    from the accent colour, the tray dot always matched the user's
+    desktop. The logo doesn't track the accent, which is the cost of
+    having the tray icon, the exe icon and any shortcut all be
+    recognisably the same mark. Worth it.
 
-    This icon matters more here than it does there. The window is pinned
-    to WorkerW and receives no mouse input at all, so the tray is not a
-    convenience -- it is the only way to reload, restart or quit."""
+    The resize to tray size is cached by logo_cache, rebuilt only when
+    logo.png's contents actually change.
+
+    The fallback is not dead code. ASSET_DIR points inside the unpacked
+    bundle under a frozen build, so a spec that forgets to include
+    logo.png would otherwise leave the app with no tray icon at all --
+    and the tray is the only control surface this widget has, since the
+    desktop layer it is pinned to receives no mouse input. An icon that
+    cannot be produced must never mean a tray that cannot be produced."""
+    img = logo_cache.tray_image()
+    if img is not None:
+        return img
+
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -502,6 +514,14 @@ def main():
     if not native.claim_single_instance():
         print("Already running -- leaving the existing widget alone.")
         return
+
+    # Keeps a cached .ico in step with logo.png. Nothing else rebuilds it,
+    # so without this a deleted cache would leave any shortcut pointing at
+    # a missing file and showing a generic icon. It also means replacing
+    # logo.png updates those shortcuts on the next launch, which is as
+    # close to live as a shell icon gets. A cache hit after the first run,
+    # so it costs a hash of one PNG.
+    logo_cache.icon_file()
 
     config = load_config()
     win = window_settings(config)

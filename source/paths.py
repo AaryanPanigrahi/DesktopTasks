@@ -12,6 +12,7 @@ a fresh install.
   config/   your data + examples   %LOCALAPPDATA%\DesktopTasks (data),
                                    the example bundled in the exe
   Docs/     documentation          not shipped
+  logo.png  at the repo root       bundled flat in the exe
   dist/     the built app          n/a
 
 The four constants that matter:
@@ -33,9 +34,9 @@ The four constants that matter:
                 for things that genuinely live at the top: the generated
                 icon, dist/.
 
-Ported from DesktopCards/source/paths.py. Its appearance.json, logo and
-Plaid-item paths are left out until the features that need them land;
-appearance.json was deliberately not adopted here.
+Ported from DesktopCards/source/paths.py. Its appearance.json and
+Plaid-item paths are left out; appearance.json was deliberately not
+adopted here.
 """
 
 import os
@@ -86,12 +87,23 @@ CACHE_DIR = os.path.join(DATA_DIR, "cache")
 # reason config.json is: the exe's folder may not be writable.
 LOG_PATH = os.path.join(DATA_DIR, "desktoptasks.log")
 
-# Bundled, read-only. The page lives with the code.
+# Bundled, read-only. The page lives with the code; the mark lives at the
+# top of the checkout, since it is the project's own identity rather than
+# part of the dashboard. Frozen, the spec bundles it flat, and REPO_ROOT is
+# the bundle -- so this one constant covers both cases.
 DASHBOARD_PATH = os.path.join(ASSET_DIR, "dashboard.html")
+BUNDLED_LOGO_PATH = os.path.join(REPO_ROOT, "logo.png")
 
-# Build output, and only ever written from source.
+# Build output, and only ever written from source: the exe's embedded icon,
+# regenerated from logo.png on every build.
 ICON_PATH = os.path.join(REPO_ROOT, "DesktopTasks.ico")
 DIST_DIR = os.path.join(REPO_ROOT, "dist")
+
+# A logo dropped in DATA_DIR wins over the bundled one. From source these
+# are the same file, so editing logo.png in the repo just works. Frozen,
+# the bundled copy is sealed inside the exe, and this is what makes the
+# mark changeable without a rebuild: drop a logo.png next to config.json.
+USER_LOGO_PATH = os.path.join(DATA_DIR, "logo.png")
 
 
 # Address loopback the same way every server here binds it. Not "localhost":
@@ -146,6 +158,16 @@ def clean_child_env():
         if key.startswith("_PYI") or key.startswith("_MEIPASS"):
             del env[key]
     return env
+
+
+def logo_path():
+    """The logo to use, preferring a user-supplied one.
+
+    Resolved on each call rather than at import, so replacing the file
+    takes effect without restarting anything that re-reads it."""
+    if USER_LOGO_PATH != BUNDLED_LOGO_PATH and os.path.exists(USER_LOGO_PATH):
+        return USER_LOGO_PATH
+    return BUNDLED_LOGO_PATH
 
 
 def ensure_data_dir():

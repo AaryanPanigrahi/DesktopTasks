@@ -40,6 +40,7 @@ ROOT = os.path.dirname(SPECPATH)
 datas = [
     (os.path.join(SOURCE_DIR, "dashboard.html"), "."),
     (os.path.join(SOURCE_DIR, "dashboard.js"), "."),
+    (os.path.join(ROOT, "logo.png"), "."),
     (os.path.join(ROOT, "config", "config.example.json"), "."),
 ]
 
@@ -57,6 +58,7 @@ hiddenimports = [
     "platform_win",
     "paths",
     "net_guard",
+    "logo_cache",
     # NOT optional, despite google_tasks.py importing it in a try/except.
     # That guard exists so a fresh clone (where this file is gitignored and
     # absent) still runs; it also means PyInstaller treats the import as

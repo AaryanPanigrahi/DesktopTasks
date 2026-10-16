@@ -1,6 +1,12 @@
-# DesktopTasks
+<p align="center">
+  <img src="logo.png" alt="DesktopTasks" width="120">
+</p>
 
-Your Google Tasks, pinned to the Windows desktop as a frameless widget.
+<h1 align="center">DesktopTasks</h1>
+
+<p align="center">
+  Your Google Tasks, pinned to the Windows desktop as a frameless widget.
+</p>
 
 Sibling project to [DesktopCards](https://github.com/AaryanPanigrahi/DesktopCards),
 which does the same thing for bank balances. The widget architecture here
@@ -152,7 +158,7 @@ pip install pyinstaller
 python source/build.py
 ```
 
-That regenerates the icon, runs a preflight, and writes
+That regenerates the icon from `logo.png`, runs a preflight, and writes
 `dist/DesktopTasks.exe` -- one file carrying Python and every dependency,
 so it runs on a machine with no Python. The exe is unsigned, so its first
 run trips SmartScreen (**More info > Run anyway**).
@@ -171,6 +177,8 @@ source/     all code; dashboard.html + dashboard.js are the page
 config/     your settings and credentials, in one config.json
             config.example.json is tracked; what you copy it into is not
 Docs/       notes and design docs
+logo.png    the app's mark -- the exe icon and the tray icon both derive
+            from it, so replacing it changes both
 ```
 
 Nothing secret is tracked: `config/config.json` and
