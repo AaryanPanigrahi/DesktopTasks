@@ -291,14 +291,22 @@ def _main():
         # An empty tasklist_ids means every list, which is the default a
         # fresh setup writes. Narrowing it is how you keep one shopping list
         # off a desktop that is mostly for work.
-        if only:
-            tasklists = [tl for tl in tasklists if tl.get("id") in only]
+        #
+        # Every list the account has is recorded, chosen or not, and only
+        # the chosen ones have their tasks fetched. Writing just the chosen
+        # ones was a dead end: the settings page reads its checkboxes from
+        # this file, so narrowing the selection deleted the other lists from
+        # the page and there was no way left to tick them again. An unchosen
+        # list costs one line here and no API call.
         lists = [
             {
                 "id": tl.get("id"),
                 "title": tl.get("title") or "Tasks",
-                "tasks": list_tasks(
-                    token, tl.get("id"), settings["show_completed"]
+                "selected": not only or tl.get("id") in only,
+                "tasks": (
+                    list_tasks(token, tl.get("id"), settings["show_completed"])
+                    if not only or tl.get("id") in only
+                    else []
                 ),
             }
             for tl in tasklists
@@ -334,8 +342,12 @@ def _main():
         )
 
     total = sum(len(lst["tasks"]) for lst in lists)
+    shown = sum(1 for lst in lists if lst["selected"])
     data = write_tasks(lists, [])
-    print(f"Wrote {total} tasks across {len(lists)} lists to config/tasks.json")
+    print(
+        f"Wrote {total} tasks across {shown} of {len(lists)} lists to "
+        f"config/tasks.json"
+    )
     return data
 
 

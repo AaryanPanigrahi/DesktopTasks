@@ -1,11 +1,11 @@
 # Privacy Policy for DesktopTasks
 
-**Effective date:** [DATE]
-**Last updated:** [DATE]
+**Effective date:** 16 October 2026
+**Last updated:** 16 October 2026
 
 > **This is a draft, not a published policy.** Before submitting it to
 > Google, fill in every `[BRACKETED]` value and publish it as a web page at
-> `https://[YOUR-DOMAIN]/privacy` — Google requires the privacy policy to be
+> `https://aaryanpanigrahi.github.io/DesktopTasks/privacy.html`. Google requires the privacy policy to be
 > **hosted on the same domain as the app's home page**, so a Markdown file
 > in this repository cannot be the URL you submit. See `Docs/README.md`
 > under "Making the app public" for the full checklist. This draft describes
@@ -17,7 +17,7 @@
 ## Who this covers
 
 DesktopTasks ("the app") is a desktop widget for Windows that displays your
-Google Tasks on your desktop. It is published by [YOUR NAME OR ENTITY]
+Google Tasks on your desktop. It is published by Aaryan Panigrahi
 ("we", "us").
 
 Contact: **[CONTACT EMAIL]**
@@ -40,7 +40,7 @@ The app requests a single Google OAuth scope:
 
 This is the narrowest scope that makes the app function. The app can read
 your tasks; it cannot create, edit, complete or delete them, and it cannot
-access any other Google service — not your email, not your files, not your
+access any other Google service. Not your email, not your files, not your
 calendar, not your contacts.
 
 Through that scope the app reads:
@@ -61,7 +61,7 @@ other use.
 Specifically, the app does **not**:
 
 - Transmit your Google user data to us or to any third party
-- Send your data to any server we operate — we operate none
+- Send your data to any server we operate, because we operate none
 - Use your data for advertising, profiling, or any form of marketing
 - Sell, rent, or trade your data
 - Use your data to train, develop, or improve any machine-learning or
@@ -99,9 +99,9 @@ party, for any purpose.
 The only network connections the app makes are directly from your computer
 to Google's own services:
 
-- `accounts.google.com` — when you sign in
-- `oauth2.googleapis.com` — to refresh its access token
-- `tasks.googleapis.com` — to read your tasks
+- `accounts.google.com`, when you sign in
+- `oauth2.googleapis.com`, to refresh its access token
+- `tasks.googleapis.com`, to read your tasks
 
 ## How long that data is kept, and how to delete it
 

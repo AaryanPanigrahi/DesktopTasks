@@ -10,7 +10,7 @@
      page_background: that value is what the native window paints in the
      sliver between body's rounded box and the window's clipped corners,
      and a mismatch shows as a seam. -->
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-translucent="off">
 <head>
 <meta charset="utf-8">
 <title>Tasks</title>
@@ -20,21 +20,35 @@
      nothing downstream needs a variant, so the whole theme is one block
      of redefinitions. Borrowed wholesale from DesktopCards so the two
      widgets sit on one desktop without looking like different software. */
+  /* Every colour below is a *-raw token, and nothing downstream paints
+     with one directly: the --alpha-* block further down turns each into
+     the var() name the rules actually use. That indirection is what makes
+     translucency a token-layer change rather than an edit to every colour
+     usage in the file. Ported from DesktopCards. */
   :root {
     color-scheme: light;
-    --surface-0:      #f3f4f6;  /* the page itself */
-    --surface-1:      #ffffff;  /* a list card */
-    --surface-2:      #e5e7eb;  /* dividers, the checkbox ring */
-    --text-primary:   #1f2937;
-    --text-secondary: #374151;
-    --text-muted:     #6b7280;
-    --text-faint:     #9ca3af;
-    --accent:         #0078d4;  /* overridden from config.json window.accent */
-    --error:          #ef4444;
-    --error-surface:  #fef2f2;
-    --overdue:        #dc2626;
-    --today:          #b45309;
-    --corner-radius:  16px;
+    --surface-0-raw:      #f3f4f6;  /* the page itself */
+    --surface-1-raw:      #ffffff;  /* a list card */
+    --surface-2-raw:      #e5e7eb;  /* dividers, the task ring */
+    --text-primary-raw:   #1f2937;
+    --text-secondary-raw: #374151;
+    --text-muted-raw:     #6b7280;
+    --text-faint-raw:     #9ca3af;
+    --accent-raw:         #0078d4;  /* overridden from config.json */
+    --error-raw:          #ef4444;
+    --error-surface-raw:  #fef2f2;
+    --overdue-raw:        #dc2626;
+    --today-raw:          #b45309;
+    --corner-radius:      16px;
+    --scale:              1;
+    /* One number for all four sides, then a per-side override on top.
+       dashboard.js resolves which is in play; the CSS only ever reads
+       the four. */
+    --spacing:            0px;
+    --spacing-left:       0px;
+    --spacing-top:        0px;
+    --spacing-right:      0px;
+    --spacing-bottom:     0px;
   }
 
   /* Dark theme. Not black: the cards stay a step lighter than the page
@@ -53,23 +67,105 @@
      WebView2 draws come out dark instead of a light strip. */
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --surface-0:      #1d2128;
-    --surface-1:      #292e37;
-    --surface-2:      #3e4651;
-    --text-primary:   #f2f4f7;
-    --text-secondary: #d5dbe3;
-    --text-muted:     #a2abb8;
-    --text-faint:     #7a8391;
-    --error:          #fa8585;
-    --error-surface:  #43282d;
+    --surface-0-raw:      #1d2128;
+    --surface-1-raw:      #292e37;
+    --surface-2-raw:      #3e4651;
+    --text-primary-raw:   #f2f4f7;
+    --text-secondary-raw: #d5dbe3;
+    --text-muted-raw:     #a2abb8;
+    --text-faint-raw:     #7a8391;
+    --error-raw:          #fa8585;
+    --error-surface-raw:  #43282d;
     /* Lighter than the light theme's reds: a saturated #dc2626 on a dark
        card reads as a glowing dot rather than as text. */
-    --overdue:        #f87171;
-    --today:          #fbbf24;
+    --overdue-raw:        #f87171;
+    --today-raw:          #fbbf24;
+  }
+
+  /* Translucency (config.json's translucent_background and opacity).
+     dashboard.js writes the three --alpha-* numbers; everything here just
+     applies them. All three default to 1, which makes every color-mix
+     below resolve to exactly its own raw token, so with translucency off
+     this whole layer is a no-op.
+
+     Three tiers, not one, because a single alpha applied uniformly reads
+     as a faded screenshot rather than a translucent panel: the page
+     backdrop takes the opacity in full, card faces take most of it, and
+     text gives up only a fraction so it stays legible over wallpaper. The
+     fractions live in dashboard.js (TRANSLUCENCY_TIERS), since they are
+     arithmetic on one input rather than styling.
+
+     color-mix against `transparent` is the mechanism. It takes a colour in
+     any format and returns it at a fraction of its alpha, without needing
+     the tokens broken into r/g/b. Resolution happens at use time, so this
+     block sitting in plain :root still picks up the dark theme's raw
+     values when that attribute is set. */
+  :root {
+    --alpha-page:    1;
+    --alpha-surface: 1;
+    --alpha-text:    1;
+    --heading-darken: 0;
+
+    --surface-0:      color-mix(in srgb, var(--surface-0-raw)      calc(var(--alpha-page) * 100%),    transparent);
+    --surface-1:      color-mix(in srgb, var(--surface-1-raw)      calc(var(--alpha-surface) * 100%), transparent);
+    --surface-2:      color-mix(in srgb, var(--surface-2-raw)      calc(var(--alpha-surface) * 100%), transparent);
+    --error-surface:  color-mix(in srgb, var(--error-surface-raw)  calc(var(--alpha-surface) * 100%), transparent);
+    --accent:         color-mix(in srgb, var(--accent-raw)         calc(var(--alpha-text) * 100%),    transparent);
+    --error:          color-mix(in srgb, var(--error-raw)          calc(var(--alpha-text) * 100%),    transparent);
+    --overdue:        color-mix(in srgb, var(--overdue-raw)        calc(var(--alpha-text) * 100%),    transparent);
+    --today:          color-mix(in srgb, var(--today-raw)          calc(var(--alpha-text) * 100%),    transparent);
+    --text-primary:   color-mix(in srgb, var(--text-primary-raw)   calc(var(--alpha-text) * 100%),    transparent);
+    --text-secondary: color-mix(in srgb, var(--text-secondary-raw) calc(var(--alpha-text) * 100%),    transparent);
+    --text-muted:     color-mix(in srgb, var(--text-muted-raw)     calc(var(--alpha-text) * 100%),    transparent);
+    /* The header and the clock are the only text sitting on the page
+       backdrop rather than on a card, so they are the only text whose
+       real background is the wallpaper. A faint grey that reads as a quiet
+       label on a solid page turns into haze over an arbitrary photo, so as
+       the page disappears they are pulled toward near-black by
+       --heading-darken. */
+    --text-faint:     color-mix(in srgb,
+                        color-mix(in srgb, #000 calc(var(--heading-darken) * 100%),
+                                  var(--text-faint-raw))
+                        calc(var(--alpha-text) * 100%), transparent);
+  }
+
+  /* Off is not cosmetic: it drops every color-mix out of the chain, which
+     is both cheaper and exactly what the plain raw tokens already mean. */
+  :root[data-translucent="off"] {
+    --surface-0: var(--surface-0-raw);
+    --surface-1: var(--surface-1-raw);
+    --surface-2: var(--surface-2-raw);
+    --error-surface: var(--error-surface-raw);
+    --accent: var(--accent-raw);
+    --error: var(--error-raw);
+    --overdue: var(--overdue-raw);
+    --today: var(--today-raw);
+    --text-primary: var(--text-primary-raw);
+    --text-secondary: var(--text-secondary-raw);
+    --text-muted: var(--text-muted-raw);
+    --text-faint: var(--text-faint-raw);
   }
 
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--surface-0); }
+
+  /* No scrollbars, ever. The window is pinned to the desktop layer and
+     receives no mouse input, so a scrollbar is a control that can be seen
+     and never used. It also steals horizontal space from the layout and
+     makes the page a few pixels narrower than the window it is measuring
+     itself against.
+
+     Nothing is lost by hiding them. The window resizes itself to the full
+     content height after every render (fitWindowToContent), so there is
+     never anything below the fold to scroll to. If a scrollbar does
+     appear, the resize is wrong and that is the bug to fix, not the
+     scrollbar. */
+  html, body {
+    margin: 0;
+    background: var(--surface-0);
+    overflow: hidden;
+    scrollbar-width: none;        /* Firefox, and WebView2 honours it */
+  }
+  html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
   body {
     color: var(--text-primary);
     font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
@@ -82,12 +178,47 @@
     cursor: default;
   }
 
-  /* The design-width source of truth. widget.py's WINDOW_WIDTH must match
-     it: the window opens at that width, and dashboard.js confirms it
-     through resize_window using this same number. */
+  /* One column's design width, and the gap between columns. The shell
+     grows with the column count, which dashboard.js sets on <html> after
+     it decides how many there are, and then asks the window to match.
+     Keep --col-width in step with dashboard.js's BASE_WIDTH and with
+     widget.py's WINDOW_WIDTH, which is the single-column case. */
+  :root { --columns: 1; --col-width: 325px; --col-gap: 10px; }
+
   #shell {
-    width: 325px;
-    padding: 14px;
+    width: calc(var(--col-width) * var(--columns)
+                + var(--col-gap) * (var(--columns) - 1)
+                + var(--spacing-left) + var(--spacing-right));
+    padding: calc(14px + var(--spacing-top)) calc(14px + var(--spacing-right))
+             calc(14px + var(--spacing-bottom)) calc(14px + var(--spacing-left));
+    /* zoom rather than transform: scale. transform leaves the element's
+       layout box at its original size, so the window would be sized for
+       unscaled content and clip or leave a gap. zoom changes layout, so
+       getBoundingClientRect reports the real painted size and the window
+       fits it. */
+    zoom: var(--scale);
+  }
+
+  /* The columns themselves. A grid rather than CSS columns: these are
+     whole lists assigned to a specific column by dashboard.js, not a
+     stream of text to be balanced, and a balancing algorithm would undo
+     that assignment. align-items start keeps a short column's cards at
+     the top instead of stretching them down to match the tallest. */
+  #lists {
+    display: grid;
+    grid-template-columns: repeat(var(--columns), 1fr);
+    gap: 0 var(--col-gap);
+    align-items: start;
+  }
+  .column { min-width: 0; }
+
+  /* The footer when max_tasks cut the render short. */
+  .more {
+    grid-column: 1 / -1;
+    color: var(--text-faint);
+    font-size: 11.5px;
+    text-align: center;
+    padding-top: 8px;
   }
 
   /* ---------------------------------------------------------- header */

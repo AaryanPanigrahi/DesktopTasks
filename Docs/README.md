@@ -31,14 +31,16 @@ every decision that isn't obvious from reading the code.
   and no Alt+Tab entry, and stays visible through Win+D ("show desktop").
 - Sizes itself to its content after every render, so the window grows and
   shrinks with the task count rather than scrolling or clipping the last
-  task.
-- A system tray icon gives you **Reload** (re-fetch now), **Reconnect
-  Google** (sign in again — a weekly errand, see
+  task. Up to the screen height, which the OS will not let a pinned window
+  exceed. See [The height ceiling](#the-height-ceiling).
+- A system tray icon gives you **Reload** (re-fetch now), **Modify**
+  (the settings page, which is also where you sign in again. A weekly
+  errand, see
   [Testing status](#testing-status-and-the-two-things-it-costs)),
-  **Restart** (relaunch, for settings only read at startup) and **Quit**.
-  The widget itself cannot be clicked at all while pinned (see
-  [Pinned and read-only](#pinned-and-read-only)), so this is the whole
-  control surface.
+  **Restart** (relaunch, for settings only read when the window is
+  created) and **Quit**. The widget itself cannot be clicked at all while
+  pinned (see [Pinned and read-only](#pinned-and-read-only)), so this is
+  the whole control surface.
 - Counts down the minutes until the next scheduled refresh next to the
   time of the last one.
 
@@ -57,7 +59,7 @@ python source/google_tasks_setup.py                # sign in to Google
 python source/desktoptasks.py                      # run the widget
 ```
 
-A clone needs a Google OAuth client of its own — the one a release would
+A clone needs a Google OAuth client of its own. The one a release would
 bundle is deliberately not in the repo. See
 [The OAuth client](#the-oauth-client-shipped-with-the-app-never-committed).
 
@@ -73,7 +75,7 @@ bundle is deliberately not in the repo. See
 
 Imports live inside each branch rather than at the top of the file. The
 widget pulls in pywebview, pythonnet and the whole .NET interop layer, and
-nothing else here needs any of it — from source that would be a slower
+nothing else here needs any of it. From source that would be a slower
 start, and frozen it would be wasted unpacking on every launch.
 
 ---
@@ -86,23 +88,24 @@ at the repo root. Paths are given bare for readability.
 
 | File | Role |
 |---|---|
-| `desktoptasks.py` | The entry point. Every mode is a flag on this one file. Also redirects `stdout`/`stderr` to a log when there's no console — see [No console](#no-console-so-output-goes-to-a-file). |
+| `desktoptasks.py` | The entry point. Every mode is a flag on this one file. Also redirects `stdout`/`stderr` to a log when there's no console. See [No console](#no-console-so-output-goes-to-a-file). |
 | `google_tasks.py` | The fetcher. Refresh token → access token, list the task lists, list open tasks in each, write `tasks.json`. One pass and exit, no loop. The only module that talks to Google's API. Stdlib only. |
 | `google_tasks_setup.py` | The consent flow. Starts a loopback listener, opens Google's own consent page, catches the redirect, saves the refresh token. Run again to reconnect. Stdlib only. |
 | `oauth_client.py` | The OAuth client a release signs in with. **Gitignored**, bundled into the exe at build time. See [The OAuth client](#the-oauth-client-shipped-with-the-app-never-committed). |
 | `oauth_client.example.py` | The tracked template of the above, with `None` values and instructions for making your own client. |
 | `widget.py` | Launches the pinned window: hosts the server, opens a frameless WebView2 window at the configured position, hides it from the taskbar, pins it behind the desktop icons so it survives Win+D, clips it to rounded corners, runs the interval fetch, runs the tray icon, and owns the Reconnect flow. |
-| `serve.py` | Minimal local web server so the page can read its JSON. Serves only an explicit allowlist — `config.json`, which holds the refresh token, is never reachable over HTTP. Loopback-bound and behind `net_guard`. Also synthesises `/settings.json` per request. Normally a thread inside `widget.py`; still runnable alone for debugging, where `POST /restart` and `/quit` correctly report there's no widget here to act on. |
-| `dashboard.html` / `dashboard.js` | The widget's UI and all its behaviour — rendering, nesting, date handling, auto-refresh, auto-resize. |
+| `serve.py` | Minimal local web server so the page can read its JSON. Serves only an explicit allowlist. `config.json`, which holds the refresh token, is never reachable over HTTP. Loopback-bound and behind `net_guard`. Also synthesises `/settings.json` per request. Normally a thread inside `widget.py`; still runnable alone for debugging, where `POST /restart` and `/quit` correctly report there's no widget here to act on. |
+| `dashboard.html` / `dashboard.js` | The widget's UI and all its behaviour. Rendering, nesting, date handling, auto-refresh, auto-resize. |
+| `settings.html` / `settings.js` | The **Modify** page, opened from the tray. Three tabs: Accounts, Layout, Appearance. The only way to change settings without editing JSON, and the only place Reconnect Google now lives. See [The settings page](#the-settings-page). |
 | `paths.py` | Where every file lives. Splits read-only bundled assets from writable per-user data, which a packaged build requires and a source checkout collapses back into one folder. |
-| `platform_win.py` | Every Windows-specific call in one file — rounded-corner clipping, taskbar hiding, desktop pinning, the accent-colour registry read, the single-instance mutex, shortcuts, and the dialog / Add-Remove-entry / deferred-self-delete pieces an installer would need. Isolated so another platform means writing a sibling, not unpicking this one. |
+| `platform_win.py` | Every Windows-specific call in one file. Rounded-corner clipping, taskbar hiding, desktop pinning, the accent-colour registry read, the single-instance mutex, shortcuts, and the dialog / Add-Remove-entry / deferred-self-delete pieces an installer would need. Isolated so another platform means writing a sibling, not unpicking this one. |
 | `net_guard.py` | The one definition of "did this request really come from this machine?". Loopback binding keeps the server off the network; this is what keeps the local browser from being used as a way in. See [Who can reach this server](#who-can-reach-this-server). |
-| `logo_cache.py` | Caches the derived copies of `logo.png` — the tray PNG and a shortcut `.ico` — in the cache folder, rebuilt only when the logo's *contents* change. |
-| `build.py` / `DesktopTasks.spec` / `make_icon.py` | Produce `dist/DesktopTasks.exe` — see [Building the executable](#building-the-executable). |
+| `logo_cache.py` | Caches the derived copies of `logo.png`. The tray PNG and a shortcut `.ico`. In the cache folder, rebuilt only when the logo's *contents* change. |
+| `build.py` / `DesktopTasks.spec` / `make_icon.py` | Produce `dist/DesktopTasks.exe`. See [Building the executable](#building-the-executable). |
 | `logo.png` | The single source of truth for the app's mark: the exe icon and the tray icon both derive from it. At the repo root rather than in `source/`, because it's the project's own identity rather than part of the dashboard. |
-| `config.json` | Your refresh token and all your settings. **Gitignored** — never committed. |
+| `config.json` | Your refresh token and all your settings. **Gitignored**: never committed. |
 | `config.example.json` | A credential-free template of the above, for sharing this tool with someone else: they copy it and fill in their own values rather than yours. |
-| `tasks.json` | The fetcher's output, rewritten every run. Gitignored — not data you'd miss. |
+| `tasks.json` | The fetcher's output, rewritten every run. Gitignored, not data you'd miss. |
 | `desktoptasks.log` | Written whenever there's no console to print to. Gitignored. |
 
 Deliberately absent, where DesktopCards has one:
@@ -110,7 +113,7 @@ Deliberately absent, where DesktopCards has one:
 | Not here | Why |
 |---|---|
 | `appearance.json` | Not adopted. The handful of look-and-feel values live in `config.json`'s `window` block instead, and reach the page through `/settings.json`. |
-| `setup_app.py` | DesktopCards' 155 KB Flask settings page. The one thing here that needs doing on a schedule is reconnecting, and that's a tray item. |
+| `setup_app.py` | DesktopCards runs its settings page as a second Flask app. Here the same page is two static files served by the widget's own server, so there is no second process, no second port and no second framework. |
 | `uninstall.py`, an installer | Not built yet. `platform_win.py` already has every OS piece it would need. |
 | `accent_color.py` | Folded into `widget.resolve_accent`, which reads the accent at launch and falls back if the registry read fails. |
 
@@ -132,22 +135,22 @@ Google account you linked.
 | Build output | `dist/`, `build/` | n/a |
 
 `paths.py` is the only module that knows the difference. Nothing else
-derives a path from `__file__` — under PyInstaller that resolves inside
+derives a path from `__file__`. Under PyInstaller that resolves inside
 `sys._MEIPASS`, a temp directory deleted on exit, which would make every
 launch look like a fresh install.
 
 The four constants that matter:
 
-- **`ASSET_DIR`** — read-only, ships with the app: `dashboard.html`,
+- **`ASSET_DIR`**: read-only, ships with the app: `dashboard.html`,
   `dashboard.js`. `source/` from source, `sys._MEIPASS` frozen. Nothing
   writable can live here; under a onefile build it's deleted when the
   process exits.
-- **`DATA_DIR`** — writable, per-user, survives upgrades and the exe being
+- **`DATA_DIR`**: writable, per-user, survives upgrades and the exe being
   moved.
-- **`EXAMPLES_DIR`** — where `config.example.json` is read from. The
+- **`EXAMPLES_DIR`**: where `config.example.json` is read from. The
   bundle when frozen, because a frozen first run has no repo folder to copy
   it out of.
-- **`REPO_ROOT`** — the checkout. Only meaningful from source, and only for
+- **`REPO_ROOT`**: the checkout. Only meaningful from source, and only for
   things that genuinely live at the top: the generated icon and `dist/`.
 
 `CONFIG_DIR` is an alias for `DATA_DIR`, kept because
@@ -163,10 +166,17 @@ default, so a missing file still runs.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `refresh_token` | `null` | Written for you when you sign in. The only lasting credential. Keep it to yourself — it grants read access to your tasks. |
-| `tasklist_ids` | `[]` | Empty means every list. Narrowing it is how you keep one shopping list off a desktop that's mostly for work. Left alone on a reconnect, so a narrowed selection survives the weekly re-auth. |
+| `refresh_token` | `null` | Written for you when you sign in. The only lasting credential. Keep it to yourself. It grants read access to your tasks. |
+| `tasklist_ids` | `[]` | Which lists to show, as ids. Empty means every list. Narrowing it is how you keep one shopping list off a desktop that's mostly for work. Left alone on a reconnect, so a narrowed selection survives the weekly re-auth. |
+| `tasklist_order` | `[]` | The order lists are drawn in, as ids. Any list not named here keeps its position behind the ones that are, so a list created later appears rather than vanishing. Set by dragging on the Layout tab. |
+| `columns` | `1` | How many columns to deal the lists across. The window widens to match. |
+| `max_tasks` | `0` | Cap on rows drawn, counted across every list and every nesting level. `0` draws everything. See the height ceiling below. |
+| `scale` | `1.0` | Zoom on the whole page. The window follows. |
+| `spacing` | `0` | Extra padding around the edges, in pixels. Widens and heightens the window. |
+| `opacity` | `1.0` | How solid the widget is, with `translucent_background` on. |
+| `translucent_background` | `false` | Lets the wallpaper through. Needs a **Restart**, because the OS window itself has to be created transparent. |
 | `port` | `5100` | Local port `serve.py` binds. |
-| `fetch_interval_minutes` | `15` | How often to re-fetch. Read at launch by the widget's own timer, so a change applies on the next **Restart** — there's no schedule registered with Windows to re-apply. |
+| `fetch_interval_minutes` | `15` | How often to re-fetch. Read at launch by the widget's own timer, so a change applies on the next **Restart**: there's no schedule registered with Windows to re-apply. |
 | `show_completed` | `false` | Include completed tasks. Applied server-side by the API, not filtered here, which keeps a list with years of history from costing several pages to read. |
 | `show_notes` | `true` | Show notes under the title. |
 | `group_by_list` | `true` | One card per list, or everything merged into one. |
@@ -178,14 +188,15 @@ default, so a missing file still runs.
 | `window.accent` | `null` | Accent colour. `null` means read your Windows accent. |
 
 Most changes land on the next **Reload**, because `/settings.json` is
-rebuilt per request. The three window ones (`x`, `y`,
-`survive_show_desktop`) need a **Restart**, since they're only read at
-startup.
+rebuilt per request. Saving from the settings page triggers that reload for
+you (see below). The window ones (`x`, `y`, `survive_show_desktop`,
+`corner_radius`, `translucent_background`) need a **Restart**, since
+they're only read when the window is created.
 
 ### Why one file, split by ownership
 
-An earlier revision split `config/` per service — `google.json` for
-credentials plus `settings.json` for the rest — on the reasoning that a
+An earlier revision split `config/` per service. `google.json` for
+credentials plus `settings.json` for the rest. On the reasoning that a
 service you never enable should leave no placeholder keys lying around.
 That was reversed once the app started shipping its own OAuth client,
 because the meaningful line stopped being *which service* a value belongs
@@ -225,11 +236,11 @@ Three consequences, each load-bearing:
 1. **`google_tasks.py` imports it in a `try/except ImportError`** with a
    `None`-valued fallback. A fresh clone has no such file, and without the
    guard it's an `ImportError` on line one. "Missing" is a supported state,
-   not a crash — `google_tasks_setup.py` prints instructions instead.
+   not a crash. `google_tasks_setup.py` prints instructions instead.
 2. **`build.py` refuses to build without it.** Put the two facts above
    together and a release built on a machine lacking the file *succeeds*
    and produces an exe that launches, looks correct, and tells every user
-   "no client configured". PyInstaller can't detect that — the import is
+   "no client configured". PyInstaller can't detect that. The import is
    conditional by design. See
    [the preflight](#the-preflight-the-one-way-this-build-can-ship-broken).
 3. **It's named in the spec's `hiddenimports`** for the same reason: a
@@ -239,9 +250,9 @@ Three consequences, each load-bearing:
 
 Google classes this as an **installed app** credential, and says so in its
 own documentation: the secret ships inside every copy of the binary and can
-be read straight out of it. What actually protects the flow is PKCE — an
+be read straight out of it. What actually protects the flow is PKCE. An
 authorization code is bound to a `code_verifier` that never leaves the
-process — plus the loopback redirect. Possessing the client pair alone
+process, plus the loopback redirect. Possessing the client pair alone
 grants nothing.
 
 Bundling rather than committing is therefore about keeping the credential
@@ -259,7 +270,7 @@ Not reproducible from the code, so it's recorded here.
   this *sensitive*, which is expected and fine.
 - **Publishing status: Testing.** See below.
 - **Test users**: the owner's own Gmail.
-- **OAuth client type: Desktop app.** Required, not a preference — it's the
+- **OAuth client type: Desktop app.** Required, not a preference. It's the
   only type Google lets redirect to an unregistered
   `http://127.0.0.1:<port>`, which the ephemeral-port loopback listener
   depends on. A "Web application" client rejects it.
@@ -289,15 +300,15 @@ run's tasks. The widget shows a stale list plus a reconnect prompt instead
 of going blank.
 
 **2. Only listed test users can sign in at all.** An External app in
-Testing admits only the Gmail addresses on its test-user list — the project
+Testing admits only the Gmail addresses on its test-user list. The project
 owner included. A stranger who downloads a build gets `access_denied`
 before the consent screen means anything. **No code change fixes this**,
 and it's the real blocker on handing this to anyone else.
 
 Publishing to production fixes both at once: any Google account may
 consent, and refresh tokens stop expiring. What remains after publishing is
-the "Google hasn't verified this app" interstitial — one click behind
-**Advanced** — and a ~100-user cap. Neither matters for a personal widget.
+the "Google hasn't verified this app" interstitial. One click behind
+**Advanced**: and a ~100-user cap. Neither matters for a personal widget.
 Full verification removes those and is the only part that needs Google to
 review anything.
 
@@ -317,7 +328,7 @@ genuine either/or.
 
 `pin_to_desktop()` reparents the window onto the desktop's own WorkerW
 paint layer, which is what makes it survive Win+D. **That layer does not
-receive normal mouse input** — the same reason Rainmeter and Wallpaper
+receive normal mouse input**: the same reason Rainmeter and Wallpaper
 Engine skins need a system-wide hook just to be clickable at all.
 
 A tasks widget makes this a real decision, because ticking a task off is
@@ -337,7 +348,7 @@ right scope, and it stays.
 Everything downstream follows from this:
 
 - No checkboxes, and no in-page controls of any kind.
-- The dot beside each task is a **ring, not a checkbox** — deliberately,
+- The dot beside each task is a **ring, not a checkbox**: deliberately,
   because anything shaped like a control would invite a click that
   silently does nothing.
 - `body` sets `user-select: none` and `cursor: default`, so there's no text
@@ -353,7 +364,7 @@ Everything downstream follows from this:
 Worth knowing for anyone debugging this: **a successfully pinned widget is
 not findable by `FindWindowW(None, "Tasks")` or by `EnumWindows`.** Once
 reparented it is no longer a top-level window, so it vanishes from the
-obvious places to look — which looks exactly like "the window never
+obvious places to look, which looks exactly like "the window never
 opened".
 
 To actually find it, enumerate the children of `Progman` and of every
@@ -379,7 +390,7 @@ calls `google_tasks.main()` every `fetch_interval_minutes`.
 The schedule lives here rather than in a Windows Task Scheduler job. The
 job would work, but it's a separate artifact registered with the OS,
 pointing at a script path, outliving any particular install, and firing
-into a widget that might not be running — writing a `tasks.json` nobody was
+into a widget that might not be running. Writing a `tasks.json` nobody was
 reading. The widget is already a long-lived process that knows the
 interval, so the schedule belongs where it starts and stops with the thing
 that displays it.
@@ -392,7 +403,7 @@ showing stale tasks.
 
 The loop catches `SystemExit` as well as `Exception`, because
 `google_tasks.main()` exits outright when no account is connected and that
-must not kill the thread — someone may connect one while the widget is
+must not kill the thread. Someone may connect one while the widget is
 running.
 
 ### The tray's Reload
@@ -415,10 +426,91 @@ reconnect, which is exactly when it needs to look reliable.
 
 `google_tasks.main()` wraps `_main()` in a module-level
 `threading.Lock`. Both callers live inside the widget process and can land
-at the same moment, and both end by rewriting `tasks.json` wholesale — so
+at the same moment, and both end by rewriting `tasks.json` wholesale, so
 overlapping runs could interleave those writes, and the loser's fetch would
 be wasted work anyway. Not reentrant: nothing calls `main()` from inside
 `main()`.
+
+---
+
+## The settings page
+
+`settings.html` and `settings.js`, opened by the tray's **Modify**. Served
+by the same server the widget already runs, from the same allowlist. There
+is no second process and no framework, which is the one real difference
+from DesktopCards' Flask-based `setup_app.py`.
+
+Three tabs, grouped by what you are deciding rather than by where the value
+is stored:
+
+| Tab | Holds |
+|---|---|
+| **Accounts** | Whether Google is connected, **Reconnect Google**, which task lists to show, and the fetch interval. |
+| **Layout** | Number of columns, maximum tasks shown, and the drag-to-reorder list order. |
+| **Appearance** | Scale, breathing room, corner radius, translucency and opacity, theme, accent, and the window position. |
+
+Position sits under Appearance rather than Layout on purpose. Layout is
+about how the lists are arranged *inside* the widget. Where the widget
+itself sits on the screen is a property of the window.
+
+### Writes go through an allowlist too
+
+`POST /api/config` merges a patch into `config.json`, and only the keys in
+`serve.WRITABLE` and `serve.WRITABLE_WINDOW` can be written, each coerced
+to a declared type. The page cannot touch `refresh_token`, `client_id`,
+`client_secret` or `port` no matter what it sends. Unknown keys are dropped
+and reported back in the response as `ignored`, rather than failing the
+whole save: a page from an older build should still be able to save the
+settings it does know about.
+
+### Saving applies immediately
+
+`POST /api/config` is followed by `POST /refresh`, and `/refresh` now calls
+`serve.reload_hook`, which `widget.py` wires to `evaluate_js("reloadAll()")`.
+
+Both halves are needed, and each was a real bug before it was there:
+
+- **Without the refetch**, which lists are fetched is itself a setting, so
+  saving a narrower selection left the old `tasks.json` in place and the
+  widget kept drawing lists that were no longer chosen.
+- **Without the reload hook**, the page's own poll only re-reads
+  `tasks.json`. `/settings.json` is only re-read by `reloadAll()`, so a
+  saved column count or scale sat in `config.json`, unused, until the next
+  interval fetch or a tray **Reload**.
+
+Either one alone reads to the user as the setting not working.
+
+### Every list is recorded, not only the chosen ones
+
+`tasks.json` carries **every** list the account has, each with a
+`selected` flag, and only the selected ones have their tasks fetched. An
+unselected list costs one line in the file and no API call.
+
+Writing only the chosen lists was the obvious thing and it was a dead end.
+The Accounts tab draws its checkboxes from `tasks.json`, so narrowing the
+selection deleted the other lists from the very page that had just
+unticked them, with no way left to tick them again. `dashboard.js` filters
+`selected === false` out before rendering.
+
+A related trap in the same area: an empty `tasklist_ids` means *every
+list*, but the page used to render every checkbox **unticked** in that
+state. Unticking a list that already looked unticked did nothing, and
+saving wrote the same empty list straight back. Now an empty selection
+ticks every box, and saving with every box ticked writes `[]` again, which
+also means a list created later shows up on its own instead of being
+excluded by a stale selection.
+
+### Sign-in reports through the server, not a dialog
+
+`POST /api/connect` answers immediately and the page polls `/api/state`
+for the result, which `widget.connect_google` writes into
+`serve.connect_status`.
+
+The flow waits on a human in a browser, so holding the request open for
+minutes would just time out somewhere. More to the point, a sign-in
+started in a browser tab should answer in that tab. The native message box
+is still there for the same flow started from somewhere other than the
+page, which is what `connect_google`'s `notify` argument selects.
 
 ---
 
@@ -434,7 +526,7 @@ stdlib, and a detached child would then have to signal its result back. A
 thread needs neither.
 
 Feedback goes through a native message box, because there's nowhere else to
-put it — the page can't be clicked and pystray has no notification surface.
+put it. The page can't be clicked and pystray has no notification surface.
 `google_tasks_setup` reports **every** failure via `sys.exit(message)`, so
 `SystemExit` is caught as the ordinary path and `e.code` is the
 user-facing string. Treating it as a bug would turn a cancelled sign-in
@@ -456,7 +548,7 @@ click warns instead of starting anything.
 
 `google_tasks_setup.main()` takes a `timeout`, defaulting to `None`.
 
-`None` — wait forever — is correct for the command line. The consent screen
+`None`. Wait forever. Is correct for the command line. The consent screen
 can take a while: picking an account, clicking past the unverified-app
 warning, two-factor. Any deadline short enough to be useful would mostly
 fire on someone still partway through it, and Ctrl-C is the cancel.
@@ -464,7 +556,7 @@ fire on someone still partway through it, and Ctrl-C is the cancel.
 It's wrong inside the widget, which has no Ctrl-C. There, a user who closes
 the browser tab without consenting would leave the function spinning on a
 daemon thread for the life of the process, holding its ephemeral port and
-the single-flight lock — so every later Reconnect would be refused. The
+the single-flight lock, so every later Reconnect would be refused. The
 widget passes 300 seconds.
 
 On success there's nothing to do but tell the page: `main()` already ends by
@@ -489,7 +581,7 @@ variant.
 
 `data-theme` is seeded to `dark` in the markup because that's the shipped
 default. Without it the window paints light for the moment before
-`dashboard.js` reads `/settings.json` and corrects it — a flash on every
+`dashboard.js` reads `/settings.json` and corrects it. A flash on every
 launch.
 
 ### Due dates are strings, deliberately
@@ -498,7 +590,7 @@ launch.
 
 `google_tasks.py` truncates each due date to a bare `YYYY-MM-DD` on
 purpose. The API stores midnight UTC, and parsing that into any zone west
-of UTC shifts the date back a day — a task due the 17th renders as the
+of UTC shifts the date back a day. A task due the 17th renders as the
 16th and reads as overdue a day early.
 
 So the rule throughout `dashboard.js` is: **compare due dates as strings,
@@ -511,7 +603,7 @@ passes `(y, m-1, d)` explicitly. **Never pass a bare date string to
 `dayDelta()` goes through those local midnights rather than subtracting
 milliseconds off the raw strings, which DST makes wrong twice a year.
 
-`last_updated` is different — it's a full local-time ISO timestamp from
+`last_updated` is different. It's a full local-time ISO timestamp from
 `datetime.isoformat()`, not a bare date, so `new Date()` is correct there.
 
 ### Subtask nesting and ordering
@@ -522,7 +614,7 @@ Tasks come back flat, each carrying a `parent` (another task's id, or
 **`position` is sorted as a string**, via `localeCompare`, never parsed as
 a number. It's a 20-digit fixed-width lexicographic key, and
 `Number('09999999999999999999') === Number('09999999999999999998')` is
-`true` — a numeric parse collides and the order silently scrambles.
+`true`. A numeric parse collides and the order silently scrambles.
 
 A subtask whose parent isn't in the response is **promoted to the top
 level** rather than dropped. That happens for real: the parent may be
@@ -531,7 +623,7 @@ child is still open. A task that silently vanishes from the widget is worse
 than one shown a level too high.
 
 Children are indented by the dot's width plus its gap, so a child's text
-starts where its parent's text does — the nesting reads off the text
+starts where its parent's text does. The nesting reads off the text
 column rather than off a rule.
 
 ### `textContent`, never `innerHTML`
@@ -539,8 +631,7 @@ column rather than off a rule.
 Every value out of `tasks.json` goes in through `textContent`. Task titles
 and notes are arbitrary text you typed on your phone, and a title
 containing `<img src=x onerror=...>` would otherwise execute inside a page
-that can reach `POST /refresh` and `/quit`. `net_guard` doesn't help here —
-that would be our own origin asking.
+that can reach `POST /refresh` and `/quit`. `net_guard` doesn't help here. That would be our own origin asking.
 
 ### `/settings.json` is synthetic
 
@@ -554,25 +645,56 @@ exposed rather than what isn't. A key added to `config.json` stays
 invisible to the browser until it's named there.
 
 Rebuilding per request is what makes editing `config.json` take effect on
-the next page load with no sync step — DesktopCards' `/appearance.json`
+the next page load with no sync step. DesktopCards' `/appearance.json`
 trick, in miniature.
 
 ### Fitting the window to the content
 
-`fitWindowToContent()` measures **height** from `document.body.scrollHeight`
-and takes **width** from a constant.
+`fitWindowToContent()` **computes** width and **measures** height.
 
-Both halves are deliberate. `documentElement.scrollHeight` has a viewport
-floor, so it never reports a height smaller than the window already is —
-the window could grow but never shrink. And measuring *width* feeds the
-window its own current width straight back, with the same result.
+Width is arithmetic, not a measurement:
+
+```
+ceil((325 * columns + 10 * (columns - 1) + spacing * 2) * scale)
+```
+
+Measuring width instead feeds the window its own current width straight
+back, so it can grow but never shrink.
 
 > **Three places hardcode the 325px design width and must change
-> together:** `#shell { width }` in `dashboard.html`, `BASE_WIDTH` in
+> together:** `--col-width` in `dashboard.html`, `BASE_WIDTH` in
 > `dashboard.js`, and `WINDOW_WIDTH` in `widget.py`.
 
-Neither dimension is capped. A long task list is a reason for a taller
-window, not a reason to hide the last task.
+Height has to be measured, because only the page knows how many tasks
+there are. It reads `#shell`'s `getBoundingClientRect().height` and rounds
+**up**:
+
+- `#shell`, not `documentElement`, because `documentElement.scrollHeight`
+  has a viewport floor and so never reports less than the window's current
+  height.
+- `getBoundingClientRect`, not `scrollHeight`, because it returns
+  fractional pixels. `scrollHeight` rounds down, so content measuring
+  440.6px asked for a 440px window and left 0.6px unreachable below the
+  fold. With `overflow: hidden` that is invisible clipping rather than a
+  scrollbar, which is worse.
+
+`scale` is applied with CSS `zoom`, not `transform: scale`. `transform`
+leaves the element's layout box at its unscaled size, so the window would
+be sized for the wrong content and either clip or leave a gap. `zoom`
+changes layout, so the measurement above is already the painted size.
+
+#### The height ceiling
+
+**Windows will not make a desktop-pinned window taller than the screen.**
+Measured on a 1440px display, the window refused anything over 1462 device
+pixels. Not a pywebview limit: a direct `SetWindowPos` asking for 3200 came
+back 1462 as well.
+
+Past that point the extra tasks are simply not painted, and `overflow:
+hidden` means there is no scrollbar to hint at it. That is what `max_tasks`
+is for: it turns silent clipping into an explicit *"N more tasks"* footer.
+It is off by default, because most lists never reach the ceiling, and a cap
+on a list that fits would be hiding tasks for no reason.
 
 The call is wrapped in `requestAnimationFrame` so it measures after layout,
 and guarded on `window.pywebview` so the page also works in a plain browser
@@ -587,14 +709,13 @@ a region from the old size would clip a slice off the new one.
 
 | State | How it reads |
 |---|---|
-| A list with no open tasks | **All clear** — a success, not a failure |
-| No lists at all | **No task lists** — nothing connected or nothing selected, which is different from being done |
-| `AUTH_EXPIRED` | The message, plus *"Tray icon → Reconnect Google. Tasks below are from the last successful fetch."* |
+| A list with no open tasks | **All clear**: a success, not a failure |
+| No lists at all | **No task lists**: nothing connected or nothing selected, which is different from being done |
+| `AUTH_EXPIRED` | The message, plus *"Tray icon → Modify → Reconnect Google. Tasks below are from the last successful fetch."* |
 | `FETCH_FAILED` | The message, plus *"Retrying at the next refresh."* Same promise about the tasks below. |
 | No `tasks.json` at all | **No tasks yet**, plus *"Waiting for the first fetch."* |
 
-That last one has its own code (`NO_DATA`, which the fetcher never emits —
-it's the page's own state) precisely because the other two promise stale
+That last one has its own code (`NO_DATA`, which the fetcher never emits. It's the page's own state) precisely because the other two promise stale
 tasks *below* the notice, and on a first launch there aren't any. Any new
 notice code needs the same check: does it actually leave tasks on screen?
 
@@ -616,7 +737,7 @@ visited, with no code running locally:
 - **DNS rebinding.** `attacker.com` is published with a very short TTL,
   then re-resolved to `127.0.0.1`. The attacker's own JavaScript fetches
   `http://attacker.com:5100/tasks.json`, which the browser now considers
-  same-origin, so it can read the reply — every task title and note you
+  same-origin, so it can read the reply. Every task title and note you
   have. Loopback is no defence because the connection genuinely is local.
   The giveaway is the `Host` header, which still says `attacker.com`.
 - **CSRF.** A cross-origin page POSTs to `/refresh`, `/restart` or `/quit`.
@@ -624,7 +745,7 @@ visited, with no code running locally:
   fetch or kill the widget.
 
 Hence two rules: the `Host` must name this machine, and anything the
-browser itself labels cross-site is refused. One exemption — a cross-site
+browser itself labels cross-site is refused. One exemption. A cross-site
 GET *navigation*, because that becomes a page at our own origin rather than
 data handed to someone else's script.
 
@@ -636,8 +757,7 @@ GET and POST are refused, and a mismatched port is refused.
 
 Another process running on this machine. A request with neither an `Origin`
 nor a `Sec-Fetch-Site` header is allowed through, because that's an
-ordinary non-browser client — this app's own `urllib` calls among them —
-and a hostile local process is not a threat this layer can do anything
+ordinary non-browser client. This app's own `urllib` calls among them, and a hostile local process is not a threat this layer can do anything
 about. It could read `config.json` off the disk instead, so a check at the
 HTTP layer would be theatre. The attacks above are different in kind: they
 need nothing more than a tab being open.
@@ -648,7 +768,7 @@ need nothing more than a tab being open.
 reason it's separate from `serve.py`'s.
 
 The guard refuses anything the browser labels cross-site, and the consent
-redirect is cross-site **by construction** — a top-level navigation
+redirect is cross-site **by construction**: a top-level navigation
 arriving from `accounts.google.com`. Applying the guard there would reject
 the one request the listener exists to receive.
 
@@ -660,7 +780,7 @@ between opening the browser and the redirect landing.
 
 On Windows that name resolves to `::1` before `127.0.0.1`, and since this
 server is IPv4-only, every client using the name pays a dead IPv6
-connection attempt first — measured in DesktopCards at 2.08s against 0.02s
+connection attempt first. Measured in DesktopCards at 2.08s against 0.02s
 for the literal. So the app always *dials* the literal. `net_guard`
 *accepts* either spelling, plus any loopback IP in either family, because
 whatever spelling the browser happens to use has to pass.
@@ -672,9 +792,9 @@ synthesises `/settings.json`. Everything else 404s. An allowlist rather
 than a denylist, so a new file in those folders is unreachable until
 someone deliberately adds it.
 
-`translate_path` resolves against `ASSET_DIR` first — letting the base
+`translate_path` resolves against `ASSET_DIR` first. Letting the base
 class do the traversal sanitising, collapsing `..` and dropping drive
-letters — and only then re-roots the handful of URLs that belong to the
+letters, and only then re-roots the handful of URLs that belong to the
 data side. Re-rooting a path already reduced to a safe relative one can't
 reintroduce traversal. Frozen, this also means `config.json` isn't in any
 directory a URL can address at all.
@@ -697,7 +817,7 @@ against `DesktopTasks.spec` from the repo root, so `dist/` and `build/`
 land there rather than inside `source/`.
 
 > **Status: the exe builds, but has never been launched.** The frozen
-> runtime path is therefore unverified — `paths.FROZEN`, the
+> runtime path is therefore unverified. `paths.FROZEN`, the
 > `%LOCALAPPDATA%` data dir, `EXAMPLES_DIR` resolving to the bundle, and
 > above all whether pywebview loads its WebView2 backend under onefile.
 > Launching it is the first thing to do before trusting a release.
@@ -705,7 +825,7 @@ land there rather than inside `source/`.
 ### The preflight: the one way this build can ship broken
 
 `preflight()` refuses to build when `oauth_client.py` is **missing**, or
-when it's present with `CLIENT_ID = None` — which is exactly what copying
+when it's present with `CLIENT_ID = None`, which is exactly what copying
 `oauth_client.example.py` leaves behind.
 
 This exists because that is the project's only *quiet* failure. Everything
@@ -715,7 +835,7 @@ client is configured. PyInstaller cannot detect it, because the import is
 conditional by design and the module is genuinely optional at runtime.
 
 It also checks that PyInstaller is installed and that nothing is holding
-the output exe open — renaming is the test, since Windows refuses it for a
+the output exe open. Renaming is the test, since Windows refuses it for a
 file that's executing and it's harmless when nothing holds it. Otherwise
 the build dies as a bare `PermissionError` from deep inside someone else's
 code.
@@ -735,13 +855,13 @@ Frozen, `sys.executable` **is** the app: it takes no script argument and
 there are no `.py` files on disk to point at. Anything that spawns Python
 by name breaks. A single entry point with subcommands means
 `sys.executable` plus a flag covers every case, from source and frozen
-alike — which is what `widget.spawn_self` relies on for the tray's
+alike, which is what `widget.spawn_self` relies on for the tray's
 Restart.
 
 ### No console, so output goes to a file
 
 A windowed build has no console, and PyInstaller sets `sys.stdout` and
-`sys.stderr` to `None` rather than to something inert — so every `print()`
+`sys.stderr` to `None` rather than to something inert, so every `print()`
 in the codebase would raise `AttributeError` on `None.write`. That would
 turn harmless progress messages into crashes, in the build where they're
 hardest to see. It applies to a source run under `pythonw` too, which is
@@ -750,7 +870,7 @@ how the tray's Restart relaunches.
 `desktoptasks.redirect_output_to_log()` points them at
 `desktoptasks.log` instead, which doubles as the diagnostic channel the
 worst failure mode needs: pywebview coming up as a blank window with no
-traceback anywhere, and the tray — the only control surface — not
+traceback anywhere, and the tray. The only control surface, not
 appearing either. Truncated rather than rotated past 512 KB; this is a
 debug aid and the last run is the one anyone wants.
 
@@ -765,7 +885,7 @@ it, so replacing that one file changes all of them.
 
 `make_icon.py` converts it to `DesktopTasks.ico` at **seven sizes**
 (16/24/32/48/64/128/256). All of them go in rather than one scaled at
-display time — the shell picks whichever fits the context it's drawing in,
+display time. The shell picks whichever fits the context it's drawing in,
 and a single 256px image looks muddy at 16px in a taskbar. PyInstaller's
 `--icon` needs a real `.ico` and won't take a PNG, so the conversion has to
 happen somewhere.
@@ -775,7 +895,7 @@ app also uses, so there's **one definition** of what a DesktopTasks icon
 looks like rather than two that can drift.
 
 A build step rather than a committed `.ico`, so there's no binary to fall
-out of date — which is why `*.ico` is gitignored.
+out of date, which is why `*.ico` is gitignored.
 
 > An earlier version of `make_icon.py` *drew* the icon with Pillow, because
 > the project had no mark yet. That's gone now there's a real logo. The
@@ -791,7 +911,7 @@ not free, and neither changes between runs.
 Staleness is decided by a **content hash, not a modification time**, and
 that is the whole subtlety. Under a onefile build the bundled `logo.png` is
 extracted to a fresh temp directory on *every launch*, so its mtime is
-always newer than anything cached — an mtime comparison would rebuild both
+always newer than anything cached. An mtime comparison would rebuild both
 derivatives every single run, which is exactly what the cache exists to
 avoid. Hashing the bytes gives a stable answer when frozen and still
 notices a genuinely different logo.
@@ -799,7 +919,7 @@ notices a genuinely different logo.
 `widget.main()` calls `logo_cache.icon_file()` at startup to keep that
 cached `.ico` in step. Nothing else rebuilds it, so without that a deleted
 cache would leave any shortcut pointing at a missing file and showing a
-generic icon — and it means replacing `logo.png` updates those shortcuts on
+generic icon, and it means replacing `logo.png` updates those shortcuts on
 the next launch, which is as close to live as a shell icon gets.
 
 `paths.logo_path()` prefers a `logo.png` dropped in the **data folder**
@@ -814,14 +934,14 @@ re-reads it.
 
 `desktoptasks.py` imports each mode's dependencies inside its own branch,
 which is good for startup cost but invisible to PyInstaller's static
-analysis — a function-local `import widget` is not one it can follow from
+analysis. A function-local `import widget` is not one it can follow from
 the entry point. The spec names them all, or the non-default subcommands
 would be left out of the bundle entirely.
 
 `webview.platforms.winforms` and `clr` are there because pywebview resolves
 its backend **by name at runtime**, so neither is reachable statically.
 This is the part most likely to need adjusting, and it fails as a blank
-window rather than an `ImportError` — which is why
+window rather than an `ImportError`, which is why
 `widget.explain_webview_failure` exists, to say something actionable about
 the two causes (an interrupted onefile unpack, which relaunching fixes, and
 a genuinely absent WebView2 runtime, which needs a download).
@@ -849,14 +969,12 @@ Two things `widget.py` carries that only matter once frozen:
   run and badly wrong for a replacement meant to outlive us: the child
   skips extraction, uses our temp directory, and then we exit and the
   bootloader deletes it. The new process runs against a directory being
-  erased, and the first thing to go missing is the WebView2 interop layer —
-  so it dies with "Cannot find Microsoft.Web.WebView2.Core.dll", a message
+  erased, and the first thing to go missing is the WebView2 interop layer, so it dies with "Cannot find Microsoft.Web.WebView2.Core.dll", a message
   that points nowhere near the actual cause.
 - **`force_exit_soon()`**. `window.destroy()` is supposed to end
   `webview.start()` and let `main()` return, and from source it does.
   Frozen it reliably leaves the process alive with its window handle still
-  registered — pywebview's WinForms/pythonnet loop doesn't fully unwind —
-  and every such leftover pins a ~33 MB unpack directory its bootloader
+  registered. Pywebview's WinForms/pythonnet loop doesn't fully unwind, and every such leftover pins a ~33 MB unpack directory its bootloader
   can't clean up. Three restarts, three orphans. So the clean path gets a
   2.5s head start and this is the backstop. `os._exit`, not `sys.exit`,
   because the point is to skip an interpreter shutdown that is
@@ -865,21 +983,21 @@ Two things `widget.py` carries that only matter once frozen:
 `spawn_self` also starts the replacement from the **exe's own folder**, not
 `ASSET_DIR`. Frozen, `ASSET_DIR` is this process's `_MEIPASS` temp
 directory, and a process's current directory is locked against deletion
-for as long as it lives — so starting the replacement there means our own
+for as long as it lives, so starting the replacement there means our own
 bootloader can never remove its temp folder.
 
 ### Restart, Quit, and the port
 
 `Server.allow_reuse_address` is **False**, against `HTTPServer`'s default of
 True, which on Windows lets a second process silently bind the same port on
-top of a still-running one — requests then get split nondeterministically
+top of a still-running one. Requests then get split nondeterministically
 between zombie instances.
 
 The cost is that a previous instance's sockets sitting in `TIME_WAIT` make
 the bind fail outright, and the tray's Restart lands inside that window
 routinely: the old process exits and the replacement tries to bind
 milliseconds later. `build_server` retries for about six seconds, because
-`TIME_WAIT` is a timer rather than a contended lock — waiting it out *is*
+`TIME_WAIT` is a timer rather than a contended lock. Waiting it out *is*
 the fix, and retrying faster wouldn't help. It raises if the port never
 frees, which is a genuinely different situation (something else owns it)
 and should be reported rather than retried forever.
@@ -900,7 +1018,7 @@ process, so a bare `--serve` run reports honestly rather than pretending.
 rather than a lock file or a port check. The kernel releases it when the
 process dies, however it dies, so a crash or a kill can't leave a stale
 lock that blocks every future launch. The `Local\` prefix scopes it to the
-login session, which is the right boundary — two users on one machine each
+login session, which is the right boundary. Two users on one machine each
 get their own widget.
 
 This matters because the app gets launched from several places: a
@@ -921,7 +1039,7 @@ quietly rather than race for the port and die with a traceback in a popup.
 - **Rounded corners via a window region, not just CSS.** pywebview's
   `transparent` option only makes WebView2's own background transparent
   against the window's paint; it doesn't change the window's actual shape.
-  Real rounded corners — desktop visible through them — need the OS-level
+  Real rounded corners. Desktop visible through them. Need the OS-level
   `SetWindowRgn` clip. The region is built from the window's *actual client
   rect in device pixels*, not from the CSS numbers, because at any display
   scaling above 100% the real window is physically larger and a region
@@ -932,14 +1050,14 @@ quietly rather than race for the port and die with a traceback in a popup.
   needs. `requirements.txt` carries only the widget's three packages; the
   fetch and auth path is dependency-free.
 - **Tray icon instead of an in-page button.** See
-  [Pinned and read-only](#pinned-and-read-only) — the WorkerW layer takes
+  [Pinned and read-only](#pinned-and-read-only). The WorkerW layer takes
   no mouse input, so there is nowhere else for a control to go.
 - **The tray icon is the logo, with a drawn dot as fallback.** The drawn
   circle came first and had one real advantage: generated from your
   Windows accent colour, it always matched your desktop. The logo doesn't
   track the accent, which is the price of having the tray icon, the exe
   icon and any shortcut be recognisably the same mark. The fallback is not
-  dead code — `ASSET_DIR` points inside the unpacked bundle when frozen, so
+  dead code. `ASSET_DIR` points inside the unpacked bundle when frozen, so
   a spec that forgot to include `logo.png` would otherwise leave the app
   with **no tray icon at all**, and the tray is this widget's only control
   surface. An icon that can't be produced must never mean a tray that
@@ -971,16 +1089,16 @@ who are not on the test-user list sign in. Verified against Google's
 developer documentation in October 2026; the rules do change, so check the
 links before relying on this.
 
-### Step 0 — "Missing domain: github.com"
+### Step 0. "Missing domain: github.com"
 
 If the console shows **Missing domain: github.com** under Authorised
 domains, that is **not** a verification failure. It means a URL you entered
-on the branding page — the home page, privacy policy or terms — points at
+on the branding page. The home page, privacy policy or terms. Points at
 `github.com`, and every domain used anywhere in the project has to be
 pre-registered in the Authorised domains list first.
 
 **The fix:** add `github.com` to Authorised domains. Enter the bare
-top-level domain only — no `https://`, no `www.`, no path:
+top-level domain only. No `https://`, no `www.`, no path:
 
 ```
 github.com
@@ -989,7 +1107,7 @@ github.com
 Once a domain is registered you may use any of its subdomains and any page
 under it, so one entry covers every `github.com/...` URL. Google's own
 guidance is to **add the authorised domain before** you add the home page,
-privacy policy, terms or redirect URIs — doing it the other way round is
+privacy policy, terms or redirect URIs. Doing it the other way round is
 exactly what produces this error. There is a limit of **ten** authorised
 domains per project.
 
@@ -999,7 +1117,7 @@ needs to go through verification".
 
 **It will not survive verification, though**, which is the next section.
 
-### Step 1 — a domain you own
+### Step 1. A domain you own
 
 **Short answer: yes, verification needs a domain you own. `github.com` can
 never work for it.**
@@ -1008,7 +1126,7 @@ Not because Google dislikes GitHub, but because of *how* domains are
 verified. Search Console requires a **Domain property**, verified at the
 **DNS level** by adding a TXT record to the domain's DNS configuration, and
 the verifying Google account must be an **owner of the Cloud project**. You
-cannot add a DNS record to `github.com` — GitHub controls it. The same
+cannot add a DNS record to `github.com`. GitHub controls it. The same
 applies to `github.io`, `vercel.app`, `netlify.app` and every other shared
 provider domain: Google's advice for these is to map the service to a
 subdomain of a domain you already own.
@@ -1017,7 +1135,7 @@ So for verification, this is the real blocker, and it gates everything
 else. Google requires the app's **home page**, **privacy policy** and
 **terms of service** to be live web pages, and the privacy policy must be
 **hosted on the same domain as the home page**. The Markdown drafts in this
-folder cannot be the URLs you submit — they have to be published.
+folder cannot be the URLs you submit. They have to be published.
 
 - The home page must be **publicly accessible** (not behind a login),
   clearly **relevant to the app under review**, and **not** a Play Store
@@ -1046,7 +1164,7 @@ Suggested layout once you have `example.com`:
 | `https://example.com/privacy` | `Docs/PRIVACY.md`, published as HTML |
 | `https://example.com/terms` | `Docs/TERMS.md`, published as HTML |
 
-Link the privacy policy and terms from the home page's footer — Google
+Link the privacy policy and terms from the home page's footer. Google
 wants the policy "visible to users", not merely reachable by direct URL.
 
 ### Do you actually need this?
@@ -1057,13 +1175,13 @@ what each one costs:
 | Goal | Domain needed? | What to do |
 |---|---|---|
 | Just you | **No** | Stay in Testing. Register `github.com` as above to clear the error. Accept the weekly reconnect. |
-| You and people you know | **Probably** | The console wants home page / privacy / terms URLs before it will let you publish to production. Those URLs need an authorised domain, but **not a verified one**, since you are not submitting for review. Try `github.com` first — it may well be accepted. |
+| You and people you know | **Probably** | The console wants home page / privacy / terms URLs before it will let you publish to production. Those URLs need an authorised domain, but **not a verified one**, since you are not submitting for review. Try `github.com` first. It may well be accepted. |
 | A public release | **Yes** | Everything in Step 1. There is no way around DNS-level domain verification. |
 
 The middle row is the one worth testing before spending money: publishing
 to production **without** submitting for verification already fixes both
-problems that bite today — the 7-day token expiry and the test-user
-restriction — and it is not certain that the console demands a *verified*
+problems that bite today. The 7-day token expiry and the test-user
+restriction, and it is not certain that the console demands a *verified*
 domain to do it. Try it with `github.com` registered; if the console lets
 you publish, you have what you need for nothing.
 
@@ -1073,7 +1191,7 @@ This is the real blocker, and it gates almost everything else. Google
 requires the app's **home page**, **privacy policy** and **terms of
 service** to be live web pages, and the privacy policy must be
 **hosted on the same domain as the home page**. The Markdown drafts in this
-folder cannot be the URLs you submit — they have to be published.
+folder cannot be the URLs you submit. They have to be published.
 
 - The home page must be **publicly accessible** (not behind a login),
   clearly **relevant to the app under review**, and **not** a Play Store
@@ -1094,13 +1212,13 @@ Suggested layout once you have `example.com`:
 | `https://example.com/privacy` | `Docs/PRIVACY.md`, published as HTML |
 | `https://example.com/terms` | `Docs/TERMS.md`, published as HTML |
 
-Link the privacy policy and terms from the home page's footer — Google wants
+Link the privacy policy and terms from the home page's footer. Google wants
 the policy "visible to users", not merely reachable by direct URL.
 
 ### The site, in `site/`
 
-`site/` holds a small static site — `index.html`, `privacy.html`,
-`terms.html`, one stylesheet and the logo — published to GitHub Pages by
+`site/` holds a small static site. `index.html`, `privacy.html`,
+`terms.html`, one stylesheet and the logo. Published to GitHub Pages by
 `.github/workflows/pages.yml`. It lands at
 `https://aaryanpanigrahi.github.io/DesktopTasks/`.
 
@@ -1111,7 +1229,7 @@ and `docs/` are different things, and relying on that distinction is a trap
 for whoever looks next.
 
 **What it is worth, and what it is not.** It gives the project a real home
-page, privacy policy and terms at URLs that are not a code listing — which
+page, privacy policy and terms at URLs that are not a code listing, which
 is what the console asks for, and what publishing to production needs. It
 does **not** make verification possible, because `github.io` cannot be
 DNS-verified (see Step 1).
@@ -1129,27 +1247,27 @@ git rm -r site .github/workflows/pages.yml
 No code imports from it, nothing in `source/` references it, and the build
 does not touch it.
 
-### Step 2 — fill in the drafts
+### Step 2. Fill in the drafts
 
 `Docs/PRIVACY.md` and `Docs/TERMS.md` are complete drafts that describe this
 app's actual behaviour. Both need every `[BRACKETED]` value filled in:
 
-- `[DATE]` — effective and last-updated dates
-- `[YOUR NAME OR ENTITY]` — who publishes the app
-- `[CONTACT EMAIL]` — a contact address. Consider a dedicated alias rather
+- `[DATE]`. Effective and last-updated dates
+- `[YOUR NAME OR ENTITY]`. Who publishes the app
+- `[CONTACT EMAIL]`. A contact address. Consider a dedicated alias rather
   than your personal Gmail, since this is published publicly.
-- `[YOUR-DOMAIN]` — your domain, in the cross-links
-- `[JURISDICTION]`, `[CURRENCY] [AMOUNT]`, `[LICENSE]` — in the terms
+- `[YOUR-DOMAIN]`. Your domain, in the cross-links
+- `[JURISDICTION]`, `[CURRENCY] [AMOUNT]`, `[LICENSE]`. In the terms
 
 The privacy policy already contains the **Google API Services Limited Use
 disclosure**, which is required when a sensitive scope is involved, and it
 already discloses how the app accesses, uses, stores and shares Google user
-data — the four things Google checks it for.
+data. The four things Google checks it for.
 
 The app's strongest argument at review is that it is **fully local**: no
 server, no telemetry, no onward disclosure. Keep that prominent.
 
-### Step 3 — the OAuth consent screen
+### Step 3. The OAuth consent screen
 
 In the Cloud console, make the branding match the pages above exactly:
 
@@ -1163,7 +1281,7 @@ Google checks that the consent screen "accurately represents the app's
 identity", so a mismatch between the app name here and the name on your
 home page is a common rejection.
 
-### Step 4 — a demo video
+### Step 4. A demo video
 
 **Required** for sensitive-scope verification, and easy to get wrong:
 
@@ -1171,7 +1289,7 @@ home page is a common rejection.
 - **In English**
 - Shows the **OAuth consent flow** as a user actually experiences it
 - Shows the **app name and the OAuth client ID** on screen, legibly
-- Demonstrates **how the sensitive scope is actually used** — i.e. the
+- Demonstrates **how the sensitive scope is actually used**: i.e. the
   widget displaying real tasks after consent
 
 For this app a short screen recording covers it: the tray's Reconnect
@@ -1179,7 +1297,7 @@ Google, the consent screen with the app name visible, then tasks appearing
 in the widget. Show the client ID from the consent screen URL or the Cloud
 console.
 
-### Step 5 — submit, and expect it to take a while
+### Step 5. Submit, and expect it to take a while
 
 Publish the app to production in the console, then submit for verification.
 Google's published timings:
@@ -1191,26 +1309,25 @@ Google's published timings:
 
 **A security assessment is not required here.** That applies to *restricted*
 scopes (Gmail, Drive and similar). `tasks.readonly` is **sensitive**, not
-restricted, so there is no third-party assessment and no associated cost —
-which is the single biggest thing working in your favour.
+restricted, so there is no third-party assessment and no associated cost, which is the single biggest thing working in your favour.
 
 ### What you get at each stage
 
 | State | Who can sign in | Token lifetime | Warning screen |
 |---|---|---|---|
 | **Testing** (now) | Only listed test users, max 100 | **7 days** | Yes |
-| **Production, unverified** | Anyone, up to a ~100-user cap | Normal | Yes — one click behind **Advanced** |
+| **Production, unverified** | Anyone, up to a ~100-user cap | Normal | Yes. One click behind **Advanced** |
 | **Production, verified** | Anyone | Normal | **No** |
 
 Note the middle row: **publishing alone, without verification, already
-fixes both of the problems that bite today** — the weekly reconnect and the
+fixes both of the problems that bite today**: the weekly reconnect and the
 test-user restriction. Verification only removes the warning screen and the
 user cap.
 
 Staying unverified is a legitimate end state, not a half-finished one.
 Google's own documentation says apps "used only by the developer and
 personally known users may skip verification and proceed through the
-unverified app screen" — which is exactly what DesktopTasks is for now.
+unverified app screen", which is exactly what DesktopTasks is for now.
 See [Do you actually need this?](#do-you-actually-need-this) above.
 
 ### Nothing in the code changes
@@ -1234,19 +1351,20 @@ once the project leaves Testing.
 - **Testing status.** The weekly reconnect, and the fact that nobody
   outside the test-user list can sign in. See
   [Testing status](#testing-status-and-the-two-things-it-costs).
-- **No appearance settings UI.** Editing `config.json` by hand is the only
-  way to change the theme, position or corner radius. DesktopCards has a
-  Flask page for this; the one thing here that needs doing on a schedule
-  is already a tray item, so this is lower value than it looks.
-- **No translucency.** DesktopCards supports a see-through card over the
-  wallpaper. It needs the page and the native window to agree — the page's
-  `rgba` colours can only blend against whatever the *window* paints — so
-  it's a both-files change, not a CSS one.
+- **The height ceiling.** With `max_tasks` at `0`, a long list runs off
+  the bottom of the screen and the tasks past the edge are invisible. The
+  OS will not grow the window further and there is no scrollbar. See
+  [The height ceiling](#the-height-ceiling). A better answer would measure
+  the screen and cap itself, instead of asking the user to pick a number.
+- **Translucency is only lightly tested.** The token layer and the
+  transparent window are both in, but it has been exercised far less than
+  the opaque path, and `erase_vacated_area` below becomes live under it.
 - **`erase_vacated_area` is unverified.** Ported from DesktopCards, where
   it guards against stale pixels left behind when a transparent window
-  shrinks. Since this window is opaque, its own background brush erases
-  what it was painting over, so the function is currently unreachable in
-  practice. It matters only if translucency is ever added.
+  shrinks. With `translucent_background` off the window is opaque and its
+  own background brush erases what it was painting over, so the function
+  is unreachable in practice. Turning translucency on is what makes it
+  matter, and that path has not been tested hard.
 - **The remote is still named `DesktopTools`.** The local folder was
   renamed; the remote URL was deliberately left alone so an existing push
   doesn't break. After renaming on GitHub:
@@ -1256,10 +1374,10 @@ once the project leaves Testing.
 
 ## References
 
-- The window machinery — frameless WebView2 window, WorkerW pinning,
+- The window machinery. Frameless WebView2 window, WorkerW pinning,
   taskbar hiding, rounded-corner clipping, the tray icon, the local server,
   the loopback request guard, the frozen/source path split and the
-  PyInstaller setup — is ported from
+  PyInstaller setup. Is ported from
   [DesktopCards](https://github.com/AaryanPanigrahi/DesktopCards), where
   it was worked out first. `net_guard.py` and `platform_win.py` are
   essentially unchanged; `paths.py` and `serve.py` are adapted; `widget.py`
@@ -1272,5 +1390,5 @@ once the project leaves Testing.
   windows are composited and a window level can be set directly instead of
   reparenting onto a layer you first have to go find.
 - Google's own documentation is the source for the installed-app credential
-  model — that a desktop client's secret is not treated as confidential,
+  model. That a desktop client's secret is not treated as confidential,
   and that PKCE is what secures the exchange.

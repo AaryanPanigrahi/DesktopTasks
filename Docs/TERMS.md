@@ -1,11 +1,11 @@
 # Terms of Service for DesktopTasks
 
-**Effective date:** [DATE]
-**Last updated:** [DATE]
+**Effective date:** 16 October 2026
+**Last updated:** 16 October 2026
 
 > **This is a draft, not published terms.** Before submitting to Google,
 > fill in every `[BRACKETED]` value and publish it as a web page at
-> `https://[YOUR-DOMAIN]/terms` — it must live on the same domain as the
+> `https://aaryanpanigrahi.github.io/DesktopTasks/terms.html`. It must live on the same domain as the
 > app's home page and the privacy policy. A Markdown file in this
 > repository cannot be the URL you submit. This is not legal advice; the
 > liability and warranty sections below are the ones worth having reviewed
@@ -17,7 +17,7 @@
 
 These terms govern your use of DesktopTasks ("the app"), a desktop widget
 for Windows that displays your Google Tasks, published by
-[YOUR NAME OR ENTITY] ("we", "us").
+Aaryan Panigrahi ("we", "us").
 
 By installing or using the app, you agree to these terms. If you do not
 agree, do not install or use it.
@@ -34,7 +34,7 @@ The app's access to your Google account is **read-only**. It cannot create,
 modify, complete or delete your tasks.
 
 How your data is handled is described in the
-[Privacy Policy](https://[YOUR-DOMAIN]/privacy), which forms part of these
+[Privacy Policy](https://aaryanpanigrahi.github.io/DesktopTasks/privacy.html), which forms part of these
 terms.
 
 ## 3. The app is free
@@ -72,7 +72,7 @@ You may use, copy and run the app for your own purposes. You may not:
 
 The app's source code is published at
 [https://github.com/AaryanPanigrahi/DesktopTasks](https://github.com/AaryanPanigrahi/DesktopTasks)
-under [LICENSE — e.g. the MIT License]. Where that licence grants you rights
+under [LICENSE, e.g. the MIT License]. Where that licence grants you rights
 in the source code, it governs; these terms govern your use of the
 distributed application and the OAuth client we provide with it.
 
@@ -105,9 +105,9 @@ deadline, appointment or obligation, arising out of or relating to your use
 of or inability to use the app.
 
 To the maximum extent permitted by law, our total aggregate liability
-arising out of or relating to the app will not exceed [CURRENCY] [AMOUNT —
-e.g. 50] or the amount you paid for the app (which is nothing), whichever is
-greater.
+arising out of or relating to the app will not exceed [CURRENCY] [AMOUNT,
+e.g. 50], or the amount you paid for the app, which is nothing. Whichever is
+greater applies.
 
 Some jurisdictions do not allow certain exclusions or limitations, so some
 of the above may not apply to you. Nothing in these terms excludes liability
@@ -141,7 +141,7 @@ Sections 7, 8 and 12 survive any termination.
 
 ## 12. Governing law
 
-These terms are governed by the laws of [JURISDICTION — e.g. your state and
+These terms are governed by the laws of [JURISDICTION, e.g. your state and
 country], without regard to its conflict-of-laws rules. The courts of
 [JURISDICTION] will have exclusive jurisdiction over any dispute, except
 where applicable law gives you the right to bring a claim elsewhere.

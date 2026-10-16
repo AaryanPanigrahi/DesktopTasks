@@ -212,6 +212,81 @@ def pin_to_desktop(window):
     print("Could not find WorkerW after 5 attempts -- Win+D persistence not applied")
 
 
+# ------------------------------------------------------- app identity
+# Windows groups taskbar buttons, jump lists and dialog icons by
+# AppUserModelID, and a process that never sets one inherits an ID derived
+# from its executable. Running from source that executable is pythonw.exe,
+# which every other Python widget on this machine also runs under -- so an
+# owner-less message box from this app turned up in the taskbar wearing
+# DesktopCards' icon, because that sibling project got there first and
+# Windows had grouped the two together.
+#
+# Setting an explicit ID makes this app its own identity, independent of
+# what launched it. It has to happen before any window exists, which is
+# why widget.main calls it first.
+APP_ID = "AaryanPanigrahi.DesktopTasks"
+
+
+def set_app_id(app_id=APP_ID):
+    """Claims a distinct taskbar identity for this process.
+
+    Not fatal if it fails: shell32 has had this export since Windows 7,
+    but a wrong icon is not worth refusing to start over."""
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+        return True
+    except (AttributeError, OSError) as e:
+        print(f"[identity] could not set the app id ({e})")
+        return False
+
+
+def set_window_icon(window, ico_path):
+    """Points a window's large and small icons at our own .ico.
+
+    The AppUserModelID above fixes grouping; this fixes the picture. A
+    window with no icon of its own falls back to the process's, which
+    from source is the Python interpreter's.
+
+    Both sizes are set because Windows asks for them separately: the
+    small one appears in the title bar and the Alt+Tab list, the large
+    one in the taskbar and the Alt+Tab preview. LoadImage with
+    LR_LOADFROMFILE reads the .ico off disk and picks the right frame
+    out of it for each requested size."""
+    if not ico_path or not os.path.exists(ico_path):
+        return False
+
+    IMAGE_ICON = 1
+    LR_LOADFROMFILE, LR_DEFAULTSIZE = 0x0010, 0x0040
+    WM_SETICON = 0x0080
+    ICON_SMALL, ICON_BIG = 0, 1
+    SM_CXICON, SM_CXSMICON = 11, 49
+
+    user32 = ctypes.windll.user32
+    user32.LoadImageW.restype = ctypes.c_void_p
+    user32.LoadImageW.argtypes = [
+        ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint,
+        ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+    ]
+    user32.SendMessageW.argtypes = [
+        ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p,
+    ]
+
+    hwnd = hwnd_of(window)
+    ok = False
+    for which, metric in ((ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)):
+        size = user32.GetSystemMetrics(metric)
+        handle = user32.LoadImageW(
+            None, str(ico_path), IMAGE_ICON, size, size,
+            LR_LOADFROMFILE | LR_DEFAULTSIZE,
+        )
+        if handle:
+            user32.SendMessageW(
+                hwnd, WM_SETICON, ctypes.c_void_p(which), ctypes.c_void_p(handle)
+            )
+            ok = True
+    return ok
+
+
 def _ps_quote(value):
     """A string as a PowerShell single-quoted literal.
 

@@ -1,0 +1,11 @@
+import { Flex, Box } from "@chakra-ui/react"
+
+const Demo = () => {
+  return (
+    <Flex gap="4" justify="space-between">
+      <Box height="10" width="40" />
+      <Box height="10" width="40" marginEnd="auto" />
+      <Box height="10" width="40" />
+    </Flex>
+  )
+}

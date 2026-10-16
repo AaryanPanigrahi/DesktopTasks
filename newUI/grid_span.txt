@@ -1,0 +1,25 @@
+import { Grid, GridItem, Box } from "@chakra-ui/react"
+
+const Demo = () => {
+  return (
+    <Grid
+      h="200px"
+      templateRows="repeat(2, 1fr)"
+      templateColumns="repeat(5, 1fr)"
+      gap={4}
+    >
+      <GridItem rowSpan={2} colSpan={1}>
+        <Box>rowSpan=2</Box>
+      </GridItem>
+      <GridItem colSpan={2}>
+        <Box>colSpan=2</Box>
+      </GridItem>
+      <GridItem colSpan={2}>
+        <Box>colSpan=2</Box>
+      </GridItem>
+      <GridItem colSpan={4}>
+        <Box>colSpan=4</Box>
+      </GridItem>
+    </Grid>
+  )
+}

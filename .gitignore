@@ -37,6 +37,13 @@ dist/
 DesktopTasks_Install/
 DesktopTasks_Install.zip
 
+# Local notes for Claude: writing style, working preferences, and the
+# shell hazards on this machine. Local only, like the trail learnings
+# below, because it is about how the work gets done rather than about
+# the app.
+claude_instructions.md
+changes.txt
+
 # Trail-code (formerly Graft) codebase map and learnings. Local-only tool,
 # never shared via git. .ignore is part of the same tooling: it is a
 # ripgrep-only file that re-admits the map to search, so it says nothing

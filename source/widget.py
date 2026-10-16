@@ -31,14 +31,15 @@ Differences from DesktopCards' widget.py, which this is ported from:
     ever adopted, they move there and the snapshot-diffing that
     DesktopCards does in refresh_now comes with them -- there is nothing
     to diff yet, so Reload simply re-applies the two cheap native calls.
-  * No logo_cache / logo.png. The tray icon is drawn from the accent
-    colour. DesktopCards caches a resized logo.png; there is no mark for
-    this project yet, and a drawn dot is not a placeholder for one -- it
-    is what the tray showed originally and it tracks the accent, which a
-    bitmap cannot.
-  * No "Modify" menu item. That opened DesktopCards' Flask setup app.
-    The equivalent here is "Reconnect Google" (connect_google), which
-    needs no Flask and no second process.
+  * The drawn tray dot is now only the fallback. It came first, and it
+    had one real advantage: generated from the accent colour, it always
+    matched the desktop. logo.png does not track the accent, which is
+    the price of the tray icon, the exe icon and any shortcut being the
+    same mark.
+  * "Modify" opens settings.html, served by serve.py, rather than
+    DesktopCards' separate Flask setup app. Same page in spirit, no
+    second process and no second port. "Reconnect Google" used to be a
+    tray item of its own and now lives on that page's Accounts tab.
 """
 
 import json
@@ -48,6 +49,7 @@ import sys
 import threading
 import time
 import urllib.request
+import webbrowser
 
 import webview
 from PIL import Image, ImageDraw
@@ -83,6 +85,8 @@ PAGE = "dashboard.html"
 # capped: a long task list is a reason for a taller window, not a reason to
 # hide the last task.
 WINDOW_WIDTH = 325
+# Keep in step with dashboard.js's COL_GAP and dashboard.html's --col-gap.
+COLUMN_GAP = 10
 INITIAL_HEIGHT = 700
 
 # Defaults for config.json's "window" block, so a config.json that predates
@@ -294,8 +298,12 @@ CONNECT_TIMEOUT_SECONDS = 300
 _connect_lock = threading.Lock()
 
 
-def connect_google(window):
-    """Tray 'Reconnect Google': runs the OAuth consent flow in-process.
+def connect_google(window, notify=None):
+    """Runs the OAuth consent flow in-process.
+
+    Reached from the settings page's Reconnect Google button, through
+    serve.connect_hook. It used to be a tray item and moved so that every
+    setting lives in one place.
 
     This is the one thing a user has to do on a schedule, because Google
     expires the refresh token every 7 days while the Cloud project's
@@ -311,17 +319,29 @@ def connect_google(window):
     child would then have to signal its result back. A daemon thread
     needs neither.
 
-    Feedback goes through a native message box because there is nowhere
-    else to put it -- the page cannot be clicked and the tray has no
-    notification surface of its own. google_tasks_setup reports every
-    failure by sys.exit with a message, which is why SystemExit is caught
-    as the ordinary path rather than as a bug."""
+    Progress and the result go into serve.connect_status, which the
+    settings page polls through /api/state. google_tasks_setup reports
+    every failure by sys.exit with a message, which is why SystemExit is
+    caught as the ordinary path rather than as a bug.
+
+    notify=True restores the old native message box. Nothing passes it
+    today; it is kept for a caller that has no page to report into, such
+    as a future tray item or a command line run."""
+    # Where the answer goes. A sign-in started from the settings page must
+    # report back through that page: a native dialog puts the result
+    # somewhere the user is not looking, and on a machine where this app is
+    # not the foreground window it is simply an interruption. notify is off
+    # by default, because every caller is now the page.
+    def report(state, message, kind="info"):
+        serve.connect_status.update(state=state, message=message)
+        print(f"[connect] {message}")
+        if notify:
+            native.message_box(message, kind=kind)
+
     if not _connect_lock.acquire(blocking=False):
-        native.message_box(
-            "A Google sign-in is already in progress. Finish it in your "
-            "browser, or wait for it to time out.",
-            kind="warn",
-        )
+        report("running",
+               "A Google sign-in is already in progress. Finish it in your "
+               "browser, or wait for it to time out.", "warn")
         return
 
     try:
@@ -332,13 +352,11 @@ def connect_google(window):
     except SystemExit as e:
         # e.code is the message string sys.exit was given -- cancelled,
         # timed out, no refresh token returned, no client configured.
-        message = str(e.code) if e.code else "Sign-in did not complete."
-        print(f"[connect] {message}")
-        native.message_box(message, kind="warn")
+        report("failed",
+               str(e.code) if e.code else "Sign-in did not complete.", "warn")
         return
     except Exception as e:
-        print(f"[connect] failed: {e}")
-        native.message_box(f"Could not connect to Google:\n\n{e}", kind="error")
+        report("failed", f"Could not connect to Google: {e}", "error")
         return
     finally:
         _connect_lock.release()
@@ -346,12 +364,11 @@ def connect_google(window):
     # google_tasks_setup.main ends by calling google_tasks.main(), so
     # tasks.json is already fresh and carries no AUTH_EXPIRED error by the
     # time we get here. Only the page needs telling.
-    print("[connect] connected; reloading the page")
+    report("ok", "Google Tasks connected.")
     try:
         window.evaluate_js("reloadAll()")
     except Exception as e:
         print(f"[connect] connected, but the page would not reload: {e}")
-    native.message_box("Google Tasks connected.")
 
 
 def explain_webview_failure(exc):
@@ -471,9 +488,9 @@ def make_tray_icon(port, window, accent, corner_radius):
 
     Not a convenience: the window is pinned to the desktop layer and
     receives no mouse input, so every action the widget can perform has to
-    be reachable from here or not at all. Reconnect Google in particular
-    is a weekly errand while the Cloud project is in Testing, and it is
-    the action a pinned page most obviously cannot offer itself.
+    be reachable from here or not at all. Modify opens the settings page,
+    which is where reconnecting Google lives along with everything else
+    that can be changed.
 
     Every item runs on its own daemon thread. pystray dispatches menu
     callbacks on the thread running the icon's own message loop, so doing
@@ -487,8 +504,18 @@ def make_tray_icon(port, window, accent, corner_radius):
             target=refresh_now, args=(port, window, corner_radius), daemon=True
         ).start()
 
-    def on_connect(icon, item):
-        threading.Thread(target=connect_google, args=(window,), daemon=True).start()
+    def on_modify(icon, item):
+        """Opens the settings page in the default browser.
+
+        An ordinary browser tab, because the widget itself is pinned to
+        the desktop layer and takes no mouse input, so it can display
+        settings but can never let anyone change them.
+
+        No new process and no second port: serve.py is already running
+        inside this one and serves /settings alongside the widget's own
+        page. DesktopCards spawns a Flask app here instead, which it
+        needs for its bank-linking flow and this does not."""
+        webbrowser.open(f"http://{LOOPBACK}:{port}/settings")
 
     def on_restart(icon, item):
         restart_now(icon, window)
@@ -498,7 +525,7 @@ def make_tray_icon(port, window, accent, corner_radius):
 
     menu = pystray.Menu(
         pystray.MenuItem("Reload", on_reload),
-        pystray.MenuItem("Reconnect Google", on_connect),
+        pystray.MenuItem("Modify", on_modify),
         pystray.MenuItem("Restart", on_restart),
         pystray.MenuItem("Quit", on_quit),
     )
@@ -515,13 +542,21 @@ def main():
         print("Already running -- leaving the existing widget alone.")
         return
 
+    # Before any window exists, and before the tray icon is built. Windows
+    # groups taskbar buttons and dialog icons by AppUserModelID, and a
+    # process that never sets one inherits an ID from its executable --
+    # pythonw.exe from source, which DesktopCards also runs under. Without
+    # this, a message box from Reconnect Google appeared in the taskbar
+    # wearing DesktopCards' logo.
+    native.set_app_id()
+
     # Keeps a cached .ico in step with logo.png. Nothing else rebuilds it,
     # so without this a deleted cache would leave any shortcut pointing at
     # a missing file and showing a generic icon. It also means replacing
     # logo.png updates those shortcuts on the next launch, which is as
     # close to live as a shell icon gets. A cache hit after the first run,
     # so it costs a hash of one PNG.
-    logo_cache.icon_file()
+    icon = logo_cache.icon_file()
 
     config = load_config()
     win = window_settings(config)
@@ -536,15 +571,51 @@ def main():
     # has to keep these in step with dashboard.html's --surface-0.
     page_background = "#1d2128" if win.get("dark_theme", True) else "#f3f4f6"
 
+    # config.json's translucent_background. The page's own rgba colours can
+    # only ever blend against whatever the WINDOW paints, so without this a
+    # translucent card would just reveal page_background and nothing else:
+    # the wallpaper is on the other side of the window, not the other side
+    # of the card. transparent=True instead sets WebView2's
+    # DefaultBackgroundColor to Color.Transparent, which makes the control
+    # composite with real per-pixel alpha against what is behind it. Since
+    # the window is reparented onto WorkerW, what is behind it is the
+    # wallpaper.
+    #
+    # It also means background_color is ignored: pywebview picks one or the
+    # other, never both. That is the intended outcome rather than a loss --
+    # page_background exists to stop a white frame flashing before the page
+    # paints, and a window with no fill has nothing to flash.
+    #
+    # An opacity of 1 counts as off, matching applyTranslucency in
+    # dashboard.js, and this is the half of that check worth having: a
+    # transparent window is composited per-pixel for its whole lifetime
+    # whether or not anything in the page is actually see-through, so a
+    # fully opaque "translucent" widget would pay that cost continuously to
+    # look exactly like the cheap one. The two files have to agree, or the
+    # page blends into a window that is not transparent.
+    translucent = (
+        bool(config.get("translucent_background"))
+        and float(config.get("opacity", 1.0)) < 0.998
+    )
+
     # Bound before the window exists, deliberately: if the port can't be
     # had this raises here, where it's a reportable failure, instead of
     # letting a window come up pointed at nothing.
     serve.serve_in_thread(port)
 
+    # The opening width follows the column count so a multi-column widget
+    # does not flash at one column's width before the page corrects it.
+    # The page still owns the real number; this is only the first frame.
+    columns = max(1, min(6, int(config.get("columns", 1) or 1)))
+    opening_width = int(
+        (WINDOW_WIDTH * columns + COLUMN_GAP * (columns - 1))
+        * float(config.get("scale", 1.0) or 1.0)
+    )
+
     window = webview.create_window(
         WINDOW_TITLE,
         url=f"http://{LOOPBACK}:{port}/{PAGE}",
-        width=WINDOW_WIDTH,
+        width=opening_width,
         height=INITIAL_HEIGHT,
         x=win.get("x", 100),
         y=win.get("y", 100),
@@ -557,10 +628,14 @@ def main():
                           # matters the moment anyone turns pinning off.
         on_top=False,
         background_color=page_background,
+        transparent=translucent,
     )
     api = Api(window, corner_radius)
     window.expose(api.resize_window)
 
+    # The window is hidden from the taskbar anyway, but the icon is what
+    # any dialog this process owns inherits, so it still matters.
+    window.events.shown += lambda: native.set_window_icon(window, icon)
     window.events.shown += lambda: native.hide_from_taskbar(window)
     window.events.shown += lambda: native.round_corners(window, corner_radius)
 
@@ -576,6 +651,12 @@ def main():
     # window, which have to exist before either can be called.
     serve.restart_hook = lambda: restart_now(tray, window)
     serve.quit_hook = lambda: quit_now(tray, window)
+    # The settings page's Reconnect Google button. Same shape as the two
+    # above: the page POSTs, this process does the work.
+    serve.connect_hook = lambda: connect_google(window)
+    # Lets /refresh re-render the page, so a save from the settings page
+    # applies without a tray Reload.
+    serve.reload_hook = lambda: window.evaluate_js("reloadAll()")
 
     # Started on 'shown' rather than here: the catch-up fetch can fire
     # immediately, and it calls evaluate_js when it finishes, which needs a

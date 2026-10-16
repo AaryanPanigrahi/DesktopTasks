@@ -40,6 +40,10 @@ ROOT = os.path.dirname(SPECPATH)
 datas = [
     (os.path.join(SOURCE_DIR, "dashboard.html"), "."),
     (os.path.join(SOURCE_DIR, "dashboard.js"), "."),
+    # The settings page, opened by the tray's Modify item. Easy to forget
+    # here, and a build without it has a Modify item that 404s.
+    (os.path.join(SOURCE_DIR, "settings.html"), "."),
+    (os.path.join(SOURCE_DIR, "settings.js"), "."),
     (os.path.join(ROOT, "logo.png"), "."),
     (os.path.join(ROOT, "config", "config.example.json"), "."),
 ]
