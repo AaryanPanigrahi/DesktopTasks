@@ -1,0 +1,22 @@
+{
+  "refresh_token": null,
+  "tasklist_ids": [],
+
+  "port": 5100,
+  "fetch_interval_minutes": 15,
+  "show_completed": false,
+  "show_notes": true,
+  "group_by_list": true,
+
+  "window": {
+    "x": 100,
+    "y": 100,
+    "corner_radius": 16,
+    "survive_show_desktop": true,
+    "dark_theme": true,
+    "accent": null
+  },
+
+  "client_id": null,
+  "client_secret": null
+}

@@ -1,0 +1,234 @@
+<!doctype html>
+<!-- data-theme is seeded to dark because that's the shipped default
+     (config.example.json's window.dark_theme). The stylesheet's own :root
+     is the light palette, so without this the window paints light for the
+     moment before dashboard.js reads /settings.json and corrects it -- a
+     flash on every launch. dashboard.js still owns the attribute after
+     that and will set it to "light" if that's what the config says.
+
+     Keep --surface-0 in each theme in step with widget.py's
+     page_background: that value is what the native window paints in the
+     sliver between body's rounded box and the window's clipped corners,
+     and a mismatch shows as a seam. -->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Tasks</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* Light palette. The dark block below redefines these same names and
+     nothing downstream needs a variant, so the whole theme is one block
+     of redefinitions. Borrowed wholesale from DesktopCards so the two
+     widgets sit on one desktop without looking like different software. */
+  :root {
+    color-scheme: light;
+    --surface-0:      #f3f4f6;  /* the page itself */
+    --surface-1:      #ffffff;  /* a list card */
+    --surface-2:      #e5e7eb;  /* dividers, the checkbox ring */
+    --text-primary:   #1f2937;
+    --text-secondary: #374151;
+    --text-muted:     #6b7280;
+    --text-faint:     #9ca3af;
+    --accent:         #0078d4;  /* overridden from config.json window.accent */
+    --error:          #ef4444;
+    --error-surface:  #fef2f2;
+    --overdue:        #dc2626;
+    --today:          #b45309;
+    --corner-radius:  16px;
+  }
+
+  /* Dark theme. Not black: the cards stay a step lighter than the page
+     behind them, because that step is what makes them read as cards
+     rather than regions of one dark sheet -- and a pure #000 page would
+     make the rounded corners vanish into the wallpaper instead of
+     floating on it. The hue is a cool blue-grey to match the light
+     theme's slate text, so switching themes doesn't change the widget's
+     temperature.
+
+     Text runs dimmer rather than greyer: on dark surfaces, lowering
+     lightness is what reads as hierarchy, where on white it's darkening.
+     --text-primary stops short of #fff so titles don't bloom.
+
+     color-scheme is set too, so the native scrollbar and anything else
+     WebView2 draws come out dark instead of a light strip. */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0:      #1d2128;
+    --surface-1:      #292e37;
+    --surface-2:      #3e4651;
+    --text-primary:   #f2f4f7;
+    --text-secondary: #d5dbe3;
+    --text-muted:     #a2abb8;
+    --text-faint:     #7a8391;
+    --error:          #fa8585;
+    --error-surface:  #43282d;
+    /* Lighter than the light theme's reds: a saturated #dc2626 on a dark
+       card reads as a glowing dot rather than as text. */
+    --overdue:        #f87171;
+    --today:          #fbbf24;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--surface-0); }
+  body {
+    color: var(--text-primary);
+    font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    /* Nothing in here is selectable or draggable. The window is pinned to
+       the desktop layer and receives no mouse input at all, so a text
+       cursor or a drag ghost would be a promise the widget cannot keep.
+       Also keeps a stray selection from surviving a reload. */
+    user-select: none;
+    cursor: default;
+  }
+
+  /* The design-width source of truth. widget.py's WINDOW_WIDTH must match
+     it: the window opens at that width, and dashboard.js confirms it
+     through resize_window using this same number. */
+  #shell {
+    width: 325px;
+    padding: 14px;
+  }
+
+  /* ---------------------------------------------------------- header */
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 0 2px 10px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text-secondary);
+  }
+  /* The countdown and clock. Sits on the page backdrop rather than on a
+     card, like DesktopCards' "updated" label. */
+  #updated {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ----------------------------------------------------------- lists */
+  .list {
+    background: var(--surface-1);
+    border-radius: var(--corner-radius);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  .list:last-child { margin-bottom: 0; }
+
+  .list-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 7px;
+  }
+  /* Ungrouped mode (group_by_list false) renders one card with no title,
+     so the padding that would sit under the heading is given back. */
+  .list.untitled { padding-top: 12px; }
+
+  /* ----------------------------------------------------------- tasks */
+  .task {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 3px 0;
+  }
+
+  /* A ring, not a checkbox. Deliberate: the widget is read-only and the
+     desktop layer cannot be clicked, so anything shaped
+     like a control would invite a click that silently does nothing. This
+     is a bullet that happens to echo the Google Tasks visual. */
+  .dot {
+    flex: 0 0 auto;
+    width: 11px;
+    height: 11px;
+    margin-top: 4px;
+    border: 1.5px solid var(--surface-2);
+    border-radius: 50%;
+  }
+  .task.overdue .dot { border-color: var(--overdue); }
+  .task.today   .dot { border-color: var(--today); }
+
+  .body { min-width: 0; flex: 1 1 auto; }
+
+  .title {
+    color: var(--text-primary);
+    /* Wraps rather than truncating. A task whose title is cut off is a
+       task you have to open another app to read, which defeats the point
+       of having it on the desktop; the window grows instead. */
+    overflow-wrap: anywhere;
+  }
+
+  .notes {
+    margin-top: 1px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+    /* Two lines, then ellipsis. Notes are reference material, not the
+       task -- an essay pasted into one shouldn't push every other task
+       off the bottom of the widget. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .due {
+    margin-top: 1px;
+    font-size: 11px;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .task.overdue .due { color: var(--overdue); font-weight: 600; }
+  .task.today   .due { color: var(--today);   font-weight: 600; }
+
+  /* Subtasks. Indented by the dot's width plus its gap, so a child's text
+     starts where its parent's text does -- the nesting reads off the text
+     column, not off a rule. */
+  .children { margin-left: 19px; }
+
+  /* ----------------------------------------------- empty + error states */
+  /* An empty list is a success, not a failure, and should read like one. */
+  .empty {
+    color: var(--text-faint);
+    font-size: 12px;
+    padding: 1px 0 2px;
+  }
+
+  .notice {
+    background: var(--error-surface);
+    border-radius: var(--corner-radius);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    color: var(--error);
+    font-size: 12px;
+  }
+  .notice strong { display: block; font-size: 12px; margin-bottom: 2px; }
+  /* How to fix it. Muted rather than red: the instruction is calm even
+     when the state above it isn't. */
+  .notice .how { color: var(--text-muted); margin-top: 3px; }
+</style>
+</head>
+<body>
+<div id="shell">
+  <header>
+    <h1>Tasks</h1>
+    <span id="updated"></span>
+  </header>
+  <!-- AUTH_EXPIRED / FETCH_FAILED land here, above the tasks: the tasks
+       below them are the previous fetch's, kept on purpose by
+       google_tasks.main() so the widget shows a stale list plus a prompt
+       rather than going blank. -->
+  <div id="notices"></div>
+  <div id="lists"></div>
+</div>
+<script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# The fetch and auth path needs nothing. google_tasks.py and
+# google_tasks_setup.py are stdlib only (urllib, http.server, secrets) --
+# deliberately, so the eventual PyInstaller bundle does not carry
+# google-api-python-client's dependency tree for two GETs and a token
+# refresh.
+#
+# The widget. pywebview drives Windows' built-in WebView2 through
+# pythonnet, which is where the .NET interop in a frozen build comes from;
+# pystray is the tray icon, which is the widget's ONLY control surface
+# because the window is pinned to the desktop layer and takes no mouse
+# input; Pillow draws the tray dot.
+pywebview>=6.0.0
+pystray>=0.19.0
+Pillow>=10.0.0
+
+# Build only -- needed to produce the exe, not to run from source.
+# pyinstaller>=6.22.0

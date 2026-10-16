@@ -1,0 +1,46 @@
+# Your settings and your credentials, in one config.json like DesktopCards.
+# config.example.json is tracked and holds placeholders only; what you copy
+# it into is not tracked, because it ends up holding your refresh token.
+config/config.json
+
+# The OAuth client that release builds sign in with. Not committed, but
+# bundled into the exe at build time, so a downloaded release needs no
+# Cloud console while a clone brings its own client. The tracked template
+# beside it, oauth_client.example.py, explains how.
+source/oauth_client.py
+
+# Fetched output, rewritten on every run. Not data you would miss.
+config/tasks.json
+config/cache/
+
+# Runtime log. Written whenever there is no console to print to, which
+# includes a source run under pythonw -- and from source, the data dir is
+# config/.
+config/desktoptasks.log
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.claude/
+
+# Build output. The spec and build scripts get committed; what they produce
+# does not. dist/ and build/ land at the repo root because the build runs
+# from there.
+build/
+dist/
+*.ico
+
+# The packaged app, built locally and uploaded to Releases, which is where
+# people download it from -- so a 30MB binary has no business sitting in
+# every clone of the repo.
+DesktopTasks_Install/
+DesktopTasks_Install.zip
+
+# Trail-code (formerly Graft) codebase map and learnings. Local-only tool,
+# never shared via git. .ignore is part of the same tooling: it is a
+# ripgrep-only file that re-admits the map to search, so it says nothing
+# about this project and belongs to whoever has the tool installed.
+.trail/
+/graft/
+/.ignore
