@@ -46,6 +46,7 @@ datas = [
     (os.path.join(SOURCE_DIR, "settings.js"), "."),
     (os.path.join(ROOT, "logo.png"), "."),
     (os.path.join(ROOT, "config", "config.example.json"), "."),
+    (os.path.join(ROOT, "config", "appearance.example.json"), "."),
 ]
 
 # ---------------------------------------------------------- hidden imports
@@ -60,6 +61,11 @@ hiddenimports = [
     "google_tasks",
     "google_tasks_setup",
     "platform_win",
+    "shortcuts",
+    # Selected by the exe's filename rather than imported from the entry
+    # point, so Analysis cannot see either of them.
+    "setup_app",
+    "uninstall",
     "paths",
     "net_guard",
     "logo_cache",
@@ -134,4 +140,8 @@ exe = EXE(
     # one relative to os.getcwd(): the build is invoked from the root but
     # the spec must not depend on that being true.
     icon=os.path.join(ROOT, "DesktopTasks.ico"),
+    # The Windows version resource. Without it the exe has an icon but no
+    # name, so Task Manager's Startup tab and Settings > Apps > Startup
+    # list it blank with no publisher. See source/version_info.txt.
+    version=os.path.join(SOURCE_DIR, "version_info.txt"),
 )

@@ -20,7 +20,8 @@ than one it works around.
 
 It exists as its own module so there's exactly one file to write a sibling
 of for another platform, rather than a Windows port with Mac exceptions
-threaded through it. See mac_port.md -- three of these five are *simpler*
+threaded through it. See Docs/mac_port.md in the DesktopCards repo, which
+this file came from -- three of these five are *simpler*
 on macOS, where windows are composited and a window level can be set
 directly instead of reparenting onto a layer you first have to go find.
 
@@ -32,7 +33,7 @@ The interface the rest of the app depends on:
     system_accent()
     window_rect(hwnd) / erase_vacated_area(window, old_rect)
     create_shortcut(...) / install_autostart(...)
-    start_menu_dir() / startup_dir()
+    start_menu_dir() / startup_dir() / desktop_dir()
     confirm_with_checkbox(...) / message_box(...)
     register_uninstaller(...) / unregister_uninstaller(...)
     delete_after_exit(...)
@@ -307,6 +308,34 @@ def startup_dir():
     return os.path.join(
         os.environ["APPDATA"], "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
     )
+
+
+def desktop_dir():
+    r"""The user's Desktop, as the shell itself has it.
+
+    Not %USERPROFILE%\Desktop: OneDrive's "back up your Desktop" moves the
+    folder, and a shortcut written to the old path lands somewhere nobody
+    looks. The registry value is the shell's own answer, so it follows."""
+    import winreg
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+        ) as key:
+            value = winreg.QueryValueEx(key, "Desktop")[0]
+        if value:
+            return os.path.expandvars(value)
+    except OSError:
+        pass
+    return os.path.join(os.environ["USERPROFILE"], "Desktop")
+
+
+def start_menu_path(name="DesktopTasks"):
+    return os.path.join(start_menu_dir(), f"{name}.lnk")
+
+
+def desktop_path(name="DesktopTasks"):
+    return os.path.join(desktop_dir(), f"{name}.lnk")
 
 
 def create_shortcut(link_path, target, arguments="", icon=None,

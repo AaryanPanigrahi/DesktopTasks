@@ -36,15 +36,19 @@ on its own -- see serve_in_thread. Running it as a script still works and
 is useful for debugging the page without the window in the way.
 """
 
+import datetime
 import fnmatch
 import http.server
 import json
 import os
 import threading
 import time
+import urllib.parse
 
+import appearance
 import google_tasks
 import net_guard
+import shortcuts
 
 from paths import (
     ASSET_DIR,
@@ -93,22 +97,30 @@ class SpacingSides:
     SIDES = ("left", "top", "right", "bottom")
 
 
-# The keys of config.json the page is allowed to see, with their defaults.
+# The keys the page is allowed to see, with their defaults.
 # An allowlist for the same reason ALLOWED_PATTERNS is one: config.json
 # holds the Google refresh token, so /settings.json is built by naming the
 # safe keys rather than by removing the unsafe ones. A key added to
 # config.json is invisible to the browser until it is named here.
 #
-# This is DesktopCards' /appearance.json trick in miniature -- it expands
-# the file server-side on every request, so an edit lands on the next page
-# load with no sync step. If appearance.json is ever adopted, the
-# look-and-feel half of this moves there.
+# The look-and-feel half of this list now comes out of appearance.json
+# rather than config.json; build_settings merges the two before reading
+# the names below, so this stays one allowlist over one dict. Both files
+# are expanded server-side on every request, which is what makes a
+# hand-edit land on the next page load with no sync step.
 PAGE_SETTINGS = {
     "show_notes": True,
     "group_by_list": True,
     "fetch_interval_minutes": 15,
     "columns": 1,
     "max_tasks": 0,
+    # Dimensions. column_width is one column's design width in CSS pixels;
+    # max_height caps the window, 0 meaning "as tall as the tasks need".
+    # Both are page concerns -- the page owns the real geometry, see
+    # dashboard.js fitWindowToContent -- so they live here, not in the
+    # "window" block, which is the OS-side position.
+    "column_width": 325,
+    "max_height": 0,
     "scale": 1.0,
     "spacing": 0,
     # Per-side overrides, used only while custom_spacing is on. Ported
@@ -123,6 +135,10 @@ PAGE_SETTINGS = {
     # effect on the next render rather than only on the next fetch.
     "tasklist_ids": [],
     "tasklist_order": [],
+    # The built-in views -- Due today and the rest. The master switch and
+    # which of them are on; see PERSONALISED below.
+    "personalised_lists": True,
+    "personalised_ids": ["due_today"],
 }
 
 # What the settings page is allowed to WRITE, by name and by type. This is
@@ -145,10 +161,15 @@ WRITABLE = {
     "tasklist_order": list,
     "columns": int,
     # How many task rows the widget draws before it stops and says how
-    # many were left out. 0 means no limit. This is what bounds the
-    # window height: the window fits its content, so capping the content
-    # is the only way to cap the window.
+    # many were left out. 0 means no limit. The polite way to bound the
+    # height: it drops whole tasks and says so, where max_height below
+    # just stops drawing mid-task.
     "max_tasks": int,
+    # One column's design width, and a hard ceiling on the window height.
+    # max_height clips rather than reflowing -- a half-visible task at the
+    # bottom edge is the point, it shows there is more below.
+    "column_width": int,
+    "max_height": int,
     # Ported from DesktopCards' appearance.json.
     "scale": float,
     "spacing": int,
@@ -156,6 +177,12 @@ WRITABLE = {
     "spacing_sides": SpacingSides,
     "opacity": float,
     "translucent_background": bool,
+    # The built-in views. Two keys rather than one so that turning them
+    # all off and turning the feature off are different states: the
+    # second forgets nothing, and ticking the master switch back on
+    # brings the same views back.
+    "personalised_lists": bool,
+    "personalised_ids": list,
 }
 
 WRITABLE_WINDOW = {
@@ -193,6 +220,100 @@ def read_spacing_sides(config):
     return out
 
 
+# The built-in views: lists the widget assembles out of the tasks already
+# fetched, rather than lists Google has. They are defined twice on purpose
+# -- here for the settings page's labels and counts, and in dashboard.js
+# for the widget's rendering -- because the widget reads tasks.json and
+# settings.json directly and never asks this endpoint. The ids and the
+# rules must stay in step with PERSONALISED in dashboard.js.
+#
+# Ids are bare words here and prefixed with "virtual:" wherever they sit
+# beside a real Google list id (tasklist_order, the Order card), so the
+# two can never be confused for one another.
+PERSONALISED = [
+    ("due_today", "Due today",
+     lambda d, t: d is not None and d <= t),
+    ("overdue", "Overdue",
+     lambda d, t: d is not None and d < t),
+    ("due_week", "Due this week",
+     lambda d, t: d is not None and d <= plus_days(t, 6)),
+    ("due_order", "Due in order",
+     lambda d, t: d is not None),
+    ("no_due", "No due date",
+     lambda d, t: d is None),
+]
+
+VIRTUAL_PREFIX = "virtual:"
+
+
+def plus_days(key, days):
+    """A date key `days` later. String maths would break on month ends."""
+    return (datetime.date.fromisoformat(key)
+            + datetime.timedelta(days=days)).isoformat()
+
+
+def personalised_lists(tasks, config):
+    """The built-in views, as rows for the settings page.
+
+    Counted off the same tasks the widget draws them from: every list
+    the account has, ticked or not, deduplicated by task id, because a
+    view gathers across lists and Google ids are unique account-wide.
+
+    Only the count is computed here. Which tasks and in what order is the
+    widget's business, and doing it twice would be two answers to drift
+    apart.
+
+    Returned whatever personalised_lists is set to: the master switch
+    decides whether the widget draws them, and the page still has to
+    show the rows, faded, or there would be nothing left to switch back
+    on."""
+    picked = set(config.get("personalised_ids") or [])
+    today = datetime.date.today().isoformat()
+
+    seen = {}
+    for lst in (tasks.get("lists") or []):
+        for task in (lst.get("tasks") or []):
+            seen.setdefault(task.get("id"), task.get("due") or None)
+
+    dues = list(seen.values())
+    return [
+        {
+            "id": VIRTUAL_PREFIX + vid,
+            "title": title,
+            "count": sum(1 for due in dues if rule(due, today)),
+            "selected": True,
+            "virtual": True,
+            "picked": vid in picked,
+        }
+        for vid, title, rule in PERSONALISED
+    ]
+
+
+def dedupe_titles(lists):
+    """Appends "(1)" to a built-in view whose name a real list already has.
+
+    Two cards with the same heading is the one way these views can be
+    actively confusing -- you cannot tell which "Overdue" you are looking
+    at. Numbered the way a file manager numbers a name collision, and
+    only the view moves: the list you made keeps the name you gave it."""
+    taken = {}
+    for lst in lists:
+        if not lst.get("virtual"):
+            taken[(lst.get("title") or "").strip().lower()] = True
+    for lst in lists:
+        if not lst.get("virtual"):
+            continue
+        base = (lst.get("title") or "").strip()
+        n = 0
+        while (base.lower() if n == 0 else
+               f"{base} ({n})".lower()) in taken:
+            n += 1
+        if n:
+            lst["title"] = f"{base} ({n})"
+        taken[lst["title"].strip().lower()] = True
+    return lists
+
+
 def build_settings():
     """The page-safe subset of config.json, as JSON bytes.
 
@@ -200,11 +321,10 @@ def build_settings():
     editing config.json takes effect on the next page load. A missing or
     broken file falls back to defaults, because a page that renders with
     default settings is recoverable and one that 500s is not."""
-    try:
-        with open(CONFIG_PATH, "r") as f:
-            config = json.load(f)
-    except (OSError, ValueError):
-        config = {}
+    # Through lift_account, so tasklist_ids and tasklist_order below come
+    # from the account that is currently active rather than from a
+    # top-level copy that only a pre-switcher config still has.
+    config = appearance.merge_into(lift_account(read_config()))
 
     window = config.get("window") or {}
     config["spacing_sides"] = read_spacing_sides(config)
@@ -212,6 +332,13 @@ def build_settings():
                for key, default in PAGE_SETTINGS.items()}
     payload.update({key: window.get(key, default)
                     for key, default in PAGE_WINDOW_SETTINGS.items()})
+    # The two file-only blocks. They ride on /settings.json, which only
+    # the widget page fetches, and are deliberately absent from
+    # /api/state, which is what the settings page reads -- that is the
+    # whole of "no UI for these": there is no control because the page is
+    # never told they exist.
+    payload["colors"] = appearance.colors()
+    payload["metrics"] = appearance.metrics()
     return json.dumps(payload).encode("utf-8")
 
 # Which URLs are answered out of DATA_DIR rather than ASSET_DIR. Everything
@@ -267,6 +394,57 @@ def read_config():
         return {}
 
 
+# The settings that belong to one Google account rather than to the
+# widget. The page edits them as plain top-level settings and knows
+# nothing about accounts; lift_account and fold_account are what make
+# that true. refresh_token is in google_tasks.ACCOUNT_KEYS too but the
+# page can never write it -- it is not in WRITABLE -- so it only ever
+# moves during the legacy migration.
+ACCOUNT_SETTINGS = ("tasklist_ids", "tasklist_order")
+
+
+def lift_account(config):
+    """Copies the active account's keys up to the top level.
+
+    The same lift google_tasks.load_config does, repeated here because
+    read_config deliberately bypasses load_config (it must not bake the
+    shipped OAuth client into a config it is about to write back). Every
+    reader below wants the active account's values under their plain
+    names, and a legacy single-account config is migrated on the way."""
+    acc = google_tasks.active_account(config)
+    if acc:
+        config["active_account"] = acc.get("id")
+        config["refresh_token"] = acc.get("refresh_token")
+        config["tasklist_ids"] = acc.get("tasklist_ids") or []
+        config["tasklist_order"] = acc.get("tasklist_order") or []
+    return config
+
+
+def fold_account(config):
+    """Puts those keys back on the account, ready to write to disk.
+
+    Mirrors google_tasks.save_config. Without it a saved task selection
+    would sit at the top level where the next lift overwrites it with
+    the account's old value, and the setting would look like it had
+    simply not saved."""
+    accs = [dict(a) for a in google_tasks.accounts(config)]
+    if not accs:
+        return config
+    acc = google_tasks.active_account(config) or accs[0]
+    for saved in accs:
+        if saved.get("id") == acc.get("id"):
+            for key in ACCOUNT_SETTINGS:
+                if key in config:
+                    saved[key] = config[key]
+    config["accounts"] = accs
+    config["active_account"] = acc.get("id")
+    # One home per key. A leftover top-level copy outranks nothing and
+    # is the first thing to go stale.
+    for key in google_tasks.ACCOUNT_KEYS:
+        config.pop(key, None)
+    return config
+
+
 def coerce(value, kind):
     """A JSON value as the type the setting expects, or raise ValueError.
 
@@ -304,12 +482,20 @@ def coerce(value, kind):
 
 
 def apply_settings(patch):
-    """Merges a patch into config.json, honouring the allowlists.
+    """Merges a patch into config.json and appearance.json.
 
     Returns (saved_config, rejected_keys). Unknown keys are reported
     rather than silently dropped, so a typo in the page shows up instead
-    of quietly doing nothing."""
-    config = read_config()
+    of quietly doing nothing.
+
+    Two files, one allowlist. The page sends one flat patch and has no
+    idea where any of it lands; everything is validated here exactly as
+    before, and only at the very end is the result split -- appearance
+    keys to appearance.json, the rest to config.json. Validating first
+    and splitting second matters: WRITABLE is what stops a browser
+    writing a key nobody allowed, and a split done earlier would mean
+    two places that have to get that right."""
+    config = appearance.merge_into(lift_account(read_config()))
     window = dict(config.get("window") or {})
     rejected = []
 
@@ -334,31 +520,113 @@ def apply_settings(patch):
             rejected.append(key)
 
     config["window"] = window
+
+    # The split. Whatever appearance.json owns comes out of the config
+    # dict here, so the file holding the refresh token never grows a copy
+    # of a setting that has moved.
+    look = {key: config.pop(key) for key in appearance.TOP_KEYS
+            if key in config}
+    look.update({key: window.pop(key) for key in appearance.WINDOW_KEYS
+                 if key in window})
+    config["window"] = window
+
+    fold_account(config)
     ensure_data_dir()
     with open(CONFIG_PATH, "w") as f:
         json.dump(config, f, indent=2)
-    return config, rejected
+    if look:
+        appearance.write(look)
+    # Merged again on the way out: the caller answers the page with this,
+    # and the page expects the settings it just saved to be in it.
+    return appearance.merge_into(config), rejected
 
 
-def build_state():
+def tasks_are_stale(tasks, config):
+    """Whether tasks.json is older than one fetch interval, or empty.
+
+    Used to decide whether a switch is worth a "Reload recommended"
+    notice. Switching to an account that was fetched two minutes ago on
+    a fifteen-minute interval needs no notice at all -- the data on
+    screen is as fresh as it would be if you had never switched, and a
+    warning there is just noise to be trained out of reading.
+
+    An unparseable or missing timestamp counts as stale: that is a
+    freshly added account with nothing shelved yet, which is exactly
+    when the notice earns its place."""
+    stamp = tasks.get("last_updated")
+    if not stamp:
+        return True
+    try:
+        age = datetime.datetime.now() - datetime.datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return True
+    try:
+        interval = int(config.get("fetch_interval_minutes", 15))
+    except (TypeError, ValueError):
+        interval = 15
+    return age.total_seconds() > max(1, interval) * 60
+
+
+def _default_ids(config):
+    ids = config.get("personalised_ids", PAGE_SETTINGS["personalised_ids"])
+    return list(ids) if isinstance(ids, list) else []
+
+
+def build_state(viewing=None):
     """Everything the settings page needs to draw itself, as JSON bytes.
 
     One request rather than four, because the page has nothing useful to
     show until it has all of it, and three of the four come off the same
     two files anyway.
 
+    `viewing` is an account id to describe INSTEAD of the active one,
+    and it changes nothing on disk. It is what makes a pending switch
+    look like a switch on the settings page while the widget stays put:
+    pick an account and the Task lists and Order cards redraw from that
+    account's shelf and its saved selection, and only Save moves the
+    widget. An unknown id is ignored rather than refused -- the worst
+    case is the page drawing the active account, which is what it would
+    have drawn anyway.
+
     Note what is NOT in here: the refresh token itself, and the OAuth
     client. The page needs to know WHETHER an account is connected, never
-    the credential that proves it."""
-    config = read_config()
+    the credential that proves it. Nor appearance.json's `colors` and
+    `metrics` -- the appearance keys the page has controls for are merged
+    in below, those two blocks are not, and that is what keeps them off
+    the UI."""
+    config = appearance.merge_into(lift_account(read_config()))
     window = config.get("window") or {}
     spacing_sides = read_spacing_sides(config)
 
-    try:
-        with open(TASKS_PATH, "r") as f:
-            tasks = json.load(f)
-    except (OSError, ValueError):
-        tasks = {}
+    active = config.get("active_account")
+    shown = next((a for a in google_tasks.accounts(config)
+                  if a.get("id") == viewing), None)
+    if shown is not None and viewing != active:
+        # The per-account settings come off that account's entry rather
+        # than off the lifted top level, which is still the active
+        # account's. Everything else in config is shared, so it stays.
+        config["tasklist_ids"] = shown.get("tasklist_ids") or []
+        config["tasklist_order"] = shown.get("tasklist_order") or []
+        tasks = google_tasks.load_json(
+            google_tasks.account_tasks_path(viewing), default=None) or {}
+        # Which account's tasks these are, for the stamp check below.
+        active = viewing
+    else:
+        viewing = active
+        try:
+            with open(TASKS_PATH, "r") as f:
+                tasks = json.load(f)
+        except (OSError, ValueError):
+            tasks = {}
+
+    # A tasks.json stamped with another account is not shown at all. It
+    # should not happen -- switching swaps the file -- but "should not
+    # happen" is how the widget ended up showing one account's lists
+    # under another's name, and an empty tab that says so is the honest
+    # answer. No stamp at all means a file written before the stamp
+    # existed, which belongs to whoever was active then: the active one.
+    if tasks.get("account") not in (None, active):
+        tasks = {"last_updated": None, "lists": [], "errors": tasks.get("errors") or []}
 
     # The task lists come from the last fetch rather than from a live API
     # call. It means the Accounts tab works offline and costs nothing to
@@ -377,10 +645,40 @@ def build_state():
         }
         for lst in (tasks.get("lists") or [])
     ]
+    # The built-in views go on the end, so they sit under the real lists
+    # in the Task lists card and at the tail of an order that has never
+    # been arranged. Renamed if one of them collides with a real list.
+    lists = dedupe_titles(lists + personalised_lists(tasks, config))
 
     return json.dumps({
         "connected": bool(config.get("refresh_token")),
+        # Whether what is on screen is older than one fetch interval.
+        # The page uses it for one thing only: whether a switch was to an
+        # account whose tasks are still current, in which case there is
+        # nothing to recommend and it says nothing.
+        "stale": tasks_are_stale(tasks, config),
+        # Id and label only. The refresh token sitting next to them in
+        # config.json stays on this side of the wire, exactly as it does
+        # for `connected` above -- the page needs to know WHICH accounts
+        # exist and which one is live, never what proves them.
+        # Which account the page is DESCRIBING, which is the pending one
+        # during a switch and the active one otherwise. The page echoes
+        # it back so a stale reply cannot repaint the wrong account.
+        "viewing": viewing,
+        "accounts": [
+            {
+                "id": acc.get("id"),
+                "label": google_tasks.account_label(acc),
+                "active": acc.get("id") == config.get("active_account"),
+            }
+            for acc in google_tasks.accounts(config)
+        ],
         "connect": dict(connect_status),
+        # Files on disk, not settings: which Windows shortcuts exist and
+        # where they would go. Sent with the rest so the Appearance tab
+        # draws its Shortcuts card without a second round trip, the way
+        # everything else on this page is one read.
+        "shortcuts": shortcuts.state(),
         "errors": tasks.get("errors") or [],
         "last_updated": tasks.get("last_updated"),
         "lists": lists,
@@ -391,8 +689,16 @@ def build_state():
             "fetch_interval_minutes": config.get("fetch_interval_minutes", 15),
             "tasklist_ids": config.get("tasklist_ids") or [],
             "tasklist_order": config.get("tasklist_order") or [],
+            "personalised_lists": config.get("personalised_lists", True),
+            # Defaulted through PAGE_SETTINGS, not to [], so a config
+            # written before these existed shows the page the same ticks
+            # the widget is already drawing from settings.json. An empty
+            # list that was actually saved stays empty.
+            "personalised_ids": _default_ids(config),
             "columns": config.get("columns", 1),
             "max_tasks": config.get("max_tasks", 0),
+            "column_width": config.get("column_width", 325),
+            "max_height": config.get("max_height", 0),
             "scale": config.get("scale", 1.0),
             "spacing": config.get("spacing", 0),
             "custom_spacing": config.get("custom_spacing", False),
@@ -487,7 +793,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
 
         if path_only == "/api/state":
-            self.send_bytes(build_state())
+            # ?account=<id> describes that account instead of the active
+            # one. Read-only, and GET for the same reason: it is the
+            # settings page previewing a switch it has not committed to,
+            # so it must not be able to change anything.
+            query = urllib.parse.parse_qs(self.path.partition("?")[2])
+            self.send_bytes(build_state((query.get("account") or [None])[0]))
             return
 
         if path_only == "/settings.json":
@@ -515,6 +826,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if self.path == "/api/connect":
             self.handle_connect()
+            return
+        if self.path == "/api/account":
+            self.handle_account()
+            return
+        if self.path == "/api/shortcuts":
+            self.handle_shortcuts()
             return
         if self.path != "/refresh":
             self.send_error(404, "Not Found")
@@ -629,6 +946,148 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             print(f"[serve] ignored unknown settings: {rejected}")
         self.send_json({"ok": True, "ignored": rejected})
 
+    def handle_account(self):
+        """Switches the active account, or removes one.
+
+        Its own route rather than a key in WRITABLE, because the id has
+        to be checked against the accounts that actually exist -- the
+        type-only coercion in apply_settings cannot do that, and writing
+        an unknown id would leave a config that silently falls back to
+        the first account. Removal could never be a setting at all.
+
+        The page calls the switch from its Save button, after the
+        settings write and before the refresh, so that the task
+        selection being saved lands on the account it was edited for and
+        the fetch that follows is the new account's. Nothing about a
+        switch is applied until then: picking an entry in the dropdown
+        only marks the form dirty.
+
+        Deliberately does NOT fetch. Save's own refresh does that."""
+        body = self.read_body()
+        if body is None:
+            self.send_json({"ok": False, "error": "expected a JSON body"}, 400)
+            return
+
+        wanted = str((body or {}).get("id") or "")
+        config = read_config()
+        known = {acc.get("id") for acc in google_tasks.accounts(config)}
+        if wanted not in known:
+            self.send_json({"ok": False, "error": "no such account"}, 400)
+            return
+
+        if (body or {}).get("action") == "remove":
+            self.remove_account(config, wanted)
+            return
+
+        # Lift-then-fold BEFORE the switch, never after. It migrates a
+        # legacy config into the accounts list, and with the old account
+        # still active it is otherwise a no-op. Done the other way round
+        # it is a data-loss bug: the lifted values belong to the account
+        # being switched away from, and folding them once `wanted` is
+        # active writes that account's task selection over this one's.
+        fold_account(lift_account(config))
+
+        # The tasks follow the account. Without this the widget keeps
+        # showing the other account's lists until the next fetch, which
+        # on a 15-minute interval is most of the time -- and the Task
+        # lists and Order cards, which are drawn from tasks.json, would
+        # be the wrong account's too.
+        previous = config.get("active_account")
+        if previous != wanted:
+            google_tasks.stash_tasks(previous)
+            google_tasks.restore_tasks(wanted)
+
+        config["active_account"] = wanted
+        try:
+            ensure_data_dir()
+            with open(CONFIG_PATH, "w") as f:
+                json.dump(config, f, indent=2)
+        except OSError as e:
+            self.send_json({"ok": False, "error": f"could not save: {e}"}, 500)
+            return
+        # The widget is drawing the old account's tasks from a file that
+        # has just been swapped under it, so it is told to re-render. No
+        # fetch, so this costs nothing and is the whole reason the switch
+        # is visible on the desktop immediately.
+        if reload_hook is not None:
+            try:
+                reload_hook()
+            except Exception as e:
+                print(f"[serve] page would not reload: {e}")
+
+        self.send_json({"ok": True, "active": wanted})
+
+    def remove_account(self, config, wanted):
+        """Forgets one account: its token, its settings and its tasks.
+
+        Immediate, not pending like a switch, because it is a button
+        with its own confirmation rather than a value in a form -- there
+        is nothing to Save and nothing to undo, so leaving it half-done
+        until a later click would only make it ambiguous.
+
+        Removing the active account hands the widget to whichever
+        account is left, and removing the last one leaves the app signed
+        out, which is the honest result of removing your only account
+        rather than something to refuse."""
+        # Migrate first, for the reason the switch does: a legacy config
+        # has no accounts list to remove anything from yet.
+        fold_account(lift_account(config))
+        accs = [a for a in google_tasks.accounts(config)
+                if a.get("id") != wanted]
+
+        was_active = config.get("active_account") == wanted
+        config["accounts"] = accs
+        if was_active:
+            # The departing account's tasks go with it, so the widget is
+            # handed the next account's shelf rather than a file that
+            # belongs to an account that no longer exists.
+            config["active_account"] = accs[0].get("id") if accs else None
+            google_tasks.restore_tasks(config["active_account"])
+
+        try:
+            os.remove(google_tasks.account_tasks_path(wanted))
+        except OSError:
+            pass          # never fetched, or already gone
+
+        try:
+            ensure_data_dir()
+            with open(CONFIG_PATH, "w") as f:
+                json.dump(config, f, indent=2)
+        except OSError as e:
+            self.send_json({"ok": False, "error": f"could not save: {e}"}, 500)
+            return
+
+        if was_active and reload_hook is not None:
+            try:
+                reload_hook()
+            except Exception as e:
+                print(f"[serve] page would not reload: {e}")
+
+        self.send_json({"ok": True, "removed": wanted,
+                        "active": config.get("active_account")})
+
+    def handle_shortcuts(self):
+        """Writes the Startup, Start-menu and Desktop shortcuts.
+
+        Its own route rather than keys in WRITABLE, because none of this
+        is in config.json -- the answer to "does it start with Windows"
+        is whether a .lnk is in the Startup folder, and that is the file
+        this writes. Nothing here can reach the token or the client
+        either, since it never opens config.json at all.
+
+        A key the body leaves out is left alone, which is what lets the
+        page post only the switches it has."""
+        body = self.read_body()
+        if body is None:
+            self.send_json({"ok": False, "error": "expected a JSON body"}, 400)
+            return
+        wanted = {
+            key: (None if body.get(key) is None else bool(body.get(key)))
+            for key in ("startup", "start_menu", "desktop")
+        }
+        result = shortcuts.apply(wanted)
+        self.send_json(result, 200 if result.get("ok") else 500)
+
     def handle_connect(self):
         """Starts the Google sign-in flow in the widget process.
 
@@ -639,8 +1098,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if connect_hook is None:
             self.send_json({"ok": False, "error": "no widget in this process"}, 404)
             return
+        # {"add": true} from the switcher's "Add another account". The
+        # body is optional -- Reconnect Google sends none at all -- so a
+        # missing or unreadable one means an ordinary reconnect.
+        add = bool((self.read_body() or {}).get("add"))
         connect_status.update(state="running", message="Waiting for Google sign-in.")
-        threading.Thread(target=connect_hook, daemon=True).start()
+        threading.Thread(target=connect_hook, args=(add,), daemon=True).start()
         self.send_json({"ok": True, "started": True})
 
     def send_bytes(self, body, content_type="application/json"):

@@ -158,7 +158,12 @@
      content height after every render (fitWindowToContent), so there is
      never anything below the fold to scroll to. If a scrollbar does
      appear, the resize is wrong and that is the bug to fix, not the
-     scrollbar. */
+     scrollbar.
+
+     The one case where content really is below the fold is a max_height
+     cap, and there the clipping is the feature -- see fitWindowToContent.
+     A scrollbar would not help anyway, for the no-mouse-input reason
+     above. */
   html, body {
     margin: 0;
     background: var(--surface-0);
@@ -168,7 +173,13 @@
   html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
   body {
     color: var(--text-primary);
-    font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    /* Written out rather than as the `font` shorthand: a var() inside a
+       shorthand is resolved at computed-value time, and a page that gets
+       the whole declaration wrong because one custom property is
+       missing would lose the font family too. */
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: calc(15px * var(--font-scale));
+    line-height: 1.45;
     -webkit-font-smoothing: antialiased;
     /* Nothing in here is selectable or draggable. The window is pinned to
        the desktop layer and receives no mouse input at all, so a text
@@ -183,7 +194,22 @@
      it decides how many there are, and then asks the window to match.
      Keep --col-width in step with dashboard.js's BASE_WIDTH and with
      widget.py's WINDOW_WIDTH, which is the single-column case. */
+  /* --col-width is the default only; applySettings overwrites it from
+     the column_width setting. */
   :root { --columns: 1; --col-width: 325px; --col-gap: 10px; }
+
+  /* appearance.json's "metrics" block, and its defaults. There is no
+     control for any of these: they are hand-edited in that file, and
+     dashboard.js overwrites these four from /settings.json on load. The
+     numbers here must match appearance.DEFAULT_METRICS, so the page is
+     already right in the moment before the JSON arrives. */
+  :root {
+    --font-scale: 1;
+    --task-font-scale: 0.95;
+    --task-indent: 24px;
+    --task-gap: 6px;
+    --task-top: 7px;
+  }
 
   #shell {
     width: calc(var(--col-width) * var(--columns)
@@ -216,60 +242,87 @@
   .more {
     grid-column: 1 / -1;
     color: var(--text-faint);
-    font-size: 11.5px;
+    font-size: calc(13.2px * var(--font-scale));
     text-align: center;
     padding-top: 8px;
   }
 
   /* ---------------------------------------------------------- header */
+  /* DesktopCards' .section-title, element for element: the heading and the
+     clock are two children of one flex row that carries the size, weight
+     and colour, so neither can drift from the other. Giving them their own
+     font sizes was what put them on different lines -- baseline alignment
+     lines up the baselines, but a 13px word and an 11px one still sit at
+     visibly different heights inside the row. */
   header {
     display: flex;
-    align-items: baseline;
     justify-content: space-between;
-    margin: 0 2px 10px;
+    align-items: baseline;
+    /* One line box for both children. Inheriting body's 1.45 gave the
+       heading and the clock half-leading computed from their own
+       (identical) metrics, which is fine in a browser but drifted by a
+       pixel under WebView2's font fallback -- enough to read as the
+       heading sitting low. At 1 there is no half-leading to disagree
+       about. */
+    line-height: 1;
+    font-size: calc(11.5px * var(--font-scale));
+    font-weight: 600;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    padding: 2px 4px;
+    margin: 0 0 10px;
   }
   h1 {
     margin: 0;
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    color: var(--text-secondary);
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
   }
   /* The countdown and clock. Sits on the page backdrop rather than on a
-     card, like DesktopCards' "updated" label. */
+     card, like DesktopCards' "updated" label, and drops that label's
+     uppercasing and tracking for the same reason it does there: a time
+     is read as a number, not as a heading. */
   #updated {
-    font-size: 11px;
-    color: var(--text-faint);
     font-variant-numeric: tabular-nums;
+    text-transform: none;
+    letter-spacing: normal;
+    font-weight: 500;
   }
 
   /* ----------------------------------------------------------- lists */
   .list {
     background: var(--surface-1);
     border-radius: var(--corner-radius);
-    padding: 10px 12px;
+    /* Left padding is --task-indent, so the title and the tasks step in
+       together; the right stays put, since indenting that edge would
+       just narrow the column. */
+    padding: 10px 12px 10px var(--task-indent);
     margin-bottom: 8px;
   }
   .list:last-child { margin-bottom: 0; }
 
   .list-title {
-    font-size: 11px;
+    font-size: calc(12.6px * var(--font-scale));
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);
-    margin-bottom: 7px;
+    margin-bottom: var(--task-top);
   }
   /* Ungrouped mode (group_by_list false) renders one card with no title,
      so the padding that would sit under the heading is given back. */
-  .list.untitled { padding-top: 12px; }
+  .list.untitled { padding-top: calc(10px + var(--task-top)); }
 
   /* ----------------------------------------------------------- tasks */
   .task {
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    padding: 3px 0;
+    /* Half the gap above and half below, so the space between two tasks
+       is --task-gap however the rows are ordered, and the space above
+       the first one is still --task-top plus half of it. */
+    padding: calc(var(--task-gap) / 2) 0;
   }
 
   /* A ring, not a checkbox. Deliberate: the widget is read-only and the
@@ -278,8 +331,8 @@
      is a bullet that happens to echo the Google Tasks visual. */
   .dot {
     flex: 0 0 auto;
-    width: 11px;
-    height: 11px;
+    width: 12.6px;
+    height: 12.6px;
     margin-top: 4px;
     border: 1.5px solid var(--surface-2);
     border-radius: 50%;
@@ -290,6 +343,7 @@
   .body { min-width: 0; flex: 1 1 auto; }
 
   .title {
+    font-size: calc(15px * var(--font-scale) * var(--task-font-scale));
     color: var(--text-primary);
     /* Wraps rather than truncating. A task whose title is cut off is a
        task you have to open another app to read, which defeats the point
@@ -297,9 +351,19 @@
     overflow-wrap: anywhere;
   }
 
+  /* "in <parent>" on a subtask promoted into one of the built-in views.
+     Faint and small: it is there to stop the row reading as a top-level
+     task, not to compete with the title it sits under. */
+  .parent {
+    margin-top: 1px;
+    font-size: calc(12.6px * var(--font-scale) * var(--task-font-scale));
+    color: var(--text-faint);
+    overflow-wrap: anywhere;
+  }
+
   .notes {
     margin-top: 1px;
-    font-size: 11.5px;
+    font-size: calc(13.2px * var(--font-scale) * var(--task-font-scale));
     color: var(--text-muted);
     overflow-wrap: anywhere;
     /* Two lines, then ellipsis. Notes are reference material, not the
@@ -313,7 +377,7 @@
 
   .due {
     margin-top: 1px;
-    font-size: 11px;
+    font-size: calc(12.6px * var(--font-scale));
     color: var(--text-faint);
     font-variant-numeric: tabular-nums;
   }
@@ -323,13 +387,13 @@
   /* Subtasks. Indented by the dot's width plus its gap, so a child's text
      starts where its parent's text does -- the nesting reads off the text
      column, not off a rule. */
-  .children { margin-left: 19px; }
+  .children { margin-left: 20.6px; }
 
   /* ----------------------------------------------- empty + error states */
   /* An empty list is a success, not a failure, and should read like one. */
   .empty {
     color: var(--text-faint);
-    font-size: 12px;
+    font-size: calc(13.8px * var(--font-scale));
     padding: 1px 0 2px;
   }
 
@@ -339,9 +403,9 @@
     padding: 10px 12px;
     margin-bottom: 8px;
     color: var(--error);
-    font-size: 12px;
+    font-size: calc(13.8px * var(--font-scale));
   }
-  .notice strong { display: block; font-size: 12px; margin-bottom: 2px; }
+  .notice strong { display: block; font-size: calc(13.8px * var(--font-scale)); margin-bottom: 2px; }
   /* How to fix it. Muted rather than red: the instruction is calm even
      when the state above it isn't. */
   .notice .how { color: var(--text-muted); margin-top: 3px; }

@@ -25,11 +25,15 @@ const DEFAULT_SETTINGS = {
   accent: null,
   columns: 1,
   max_tasks: 0,
+  column_width: 325,
+  max_height: 0,
   spacing: 0,
   custom_spacing: false,
   spacing_sides: { left: 0, top: 0, right: 0, bottom: 0 },
   tasklist_ids: [],
   tasklist_order: [],
+  personalised_lists: true,
+  personalised_ids: ['due_today'],
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -129,6 +133,122 @@ function buildTree(tasks) {
   return byParent;
 }
 
+// ------------------------------------------------ built-in views
+//
+// Lists the widget assembles out of the tasks already fetched, rather
+// than lists Google has: Due today and the rest. Defined again in
+// serve.py, which needs the names and the counts for the settings page;
+// the ids and the rules must stay in step between the two.
+//
+// Each rule takes a due date key (or null) and today's, and the view
+// draws from every task in every list being shown, deduplicated by id.
+const PERSONALISED = [
+  { id: 'due_today',  title: 'Due today',     rule: (d, t) => d !== null && d <= t },
+  { id: 'overdue',    title: 'Overdue',       rule: (d, t) => d !== null && d < t },
+  { id: 'due_week',   title: 'Due this week', rule: (d, t) => d !== null && d <= plusDays(t, 6) },
+  { id: 'due_order',  title: 'Due in order',  rule: (d) => d !== null },
+  { id: 'no_due',     title: 'No due date',   rule: (d) => d === null },
+];
+
+// Prefixed wherever a view's id sits beside a real Google list id -- in
+// tasklist_order, and in the Order card -- so the two can never be taken
+// for one another. tasklist_ids never holds one: that list goes to the
+// fetcher, and a made-up id there would be a request for a list Google
+// does not have.
+const VIRTUAL_PREFIX = 'virtual:';
+
+function plusDays(key, days) {
+  const d = parseLocalDate(key);
+  d.setDate(d.getDate() + days);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// A view's tasks, flattened and in its own order.
+//
+// Flattened on purpose: a view gathers across lists, so a subtask whose
+// parent is not in the view would be promoted to the top level anyway
+// and one whose parent is would nest under a heading that is really a
+// filter. Every row at one level is the honest shape.
+//
+// The order is carried in a synthetic `position`, because renderList
+// sorts by it -- writing the tasks out in order and leaving the real
+// position in place would just have them re-sorted back into their
+// Google order.
+function viewTasks(tasks, rule, today, byDue, titles) {
+  // `tasks` is the flat array the API returns, so subtasks are in here on
+  // the same footing as their parents and a subtask that matches the rule
+  // is picked like anything else. That is the whole of "show subtasks
+  // too": no special case, and a subtask that does NOT match is left out
+  // even when its parent is in -- these views answer "what is due", not
+  // "what hangs off what".
+  const picked = tasks.filter(t => rule(t.due || null, today));
+  if (byDue) {
+    picked.sort((a, b) => String(a.due || '').localeCompare(String(b.due || '')));
+  }
+  return picked.map((task, i) => ({
+    ...task,
+    // Flattened: parent is dropped so the row draws at the top level even
+    // when the parent is not in this view, and a synthetic position keeps
+    // buildTree's sort from undoing the order chosen above.
+    parent: null,
+    position: String(i).padStart(10, '0'),
+    // ...but not silently. A promoted subtask drawn as a bare row reads
+    // as a task of its own, which is a different thing from what is in
+    // Google Tasks, so it carries its parent's title and renderTask shows
+    // it under the title. Only where the parent is known and is not
+    // itself in the list right above it.
+    parentTitle: task.parent ? (titles.get(task.parent) || null) : null,
+  }));
+}
+
+function personalisedLists(every) {
+  if (!settings.personalised_lists) return [];
+  const picked = new Set(settings.personalised_ids || []);
+  if (!picked.size) return [];
+
+  // Deduplicated by task id: ids are unique across an account, and a
+  // task reached through two lists is still one task.
+  const seen = new Map();
+  for (const list of every) {
+    for (const task of list.tasks || []) {
+      if (!seen.has(task.id)) seen.set(task.id, task);
+    }
+  }
+  const all = [...seen.values()];
+  const today = todayKey();
+  // id -> title, for naming the parent of a promoted subtask. Built from
+  // every task rather than from the matching ones, because the parent of
+  // a task due today usually is not itself due today.
+  const titles = new Map(all.map(t => [t.id, t.title]));
+
+  return PERSONALISED.filter(v => picked.has(v.id)).map(v => ({
+    id: VIRTUAL_PREFIX + v.id,
+    title: v.title,
+    virtual: true,
+    // Every view but "No due date" is a statement about when things are
+    // due, so soonest first is the only order that means anything.
+    tasks: viewTasks(all, v.rule, today, v.id !== 'no_due', titles),
+  }));
+}
+
+// Two cards headed "Overdue" -- one yours, one built in -- is the one
+// way these views can mislead. Numbered the way a file manager numbers a
+// collision, and only the view is renamed: a list you made keeps the
+// name you gave it. Matches dedupe_titles in serve.py.
+function dedupeTitles(real, views) {
+  const taken = new Set(real.map(l => (l.title || '').trim().toLowerCase()));
+  for (const view of views) {
+    const base = (view.title || '').trim();
+    let n = 0;
+    while (taken.has(n === 0 ? base.toLowerCase()
+                             : `${base} (${n})`.toLowerCase())) n++;
+    if (n) view.title = `${base} (${n})`;
+    taken.add(view.title.trim().toLowerCase());
+  }
+  return real.concat(views);
+}
+
 // --------------------------------------------- choosing and ordering
 //
 // The fetcher already filters by tasklist_ids, so in a settled state
@@ -141,21 +261,29 @@ function buildTree(tasks) {
 //
 // An empty tasklist_ids still means every list, matching the fetcher.
 function chooseLists(lists) {
-  // tasks.json records every list the account has, including the ones not
-  // chosen, so that the settings page can still offer them. Those arrive
-  // with selected:false and no tasks, and must not be drawn.
+  // tasks.json records every list the account has, tasks and all, so
+  // that the settings page can still offer the unchosen ones and the
+  // views below can read across them. selected:false is the fetcher
+  // saying "do not draw this one a card".
   const ids = settings.tasklist_ids || [];
   const live = lists.filter(l => l.selected !== false);
   const picked = ids.length ? live.filter(l => ids.includes(l.id)) : live.slice();
 
+  // The views are built from EVERY list the account has, not from the
+  // ticked ones: "Due today" means everything due today, and a view that
+  // quietly skipped the lists you keep off the desktop would be a wrong
+  // answer rather than a narrower one. Unticking a list still keeps its
+  // own card off the widget -- that is what `picked` is for.
+  const all = dedupeTitles(picked, personalisedLists(lists));
+
   const order = settings.tasklist_order || [];
-  if (!order.length) return picked;
+  if (!order.length) return all;
 
   // Named lists first, in the order given. Anything not named keeps its
   // original position behind them, so a list created after the order was
   // set appears rather than vanishing.
   const rank = new Map(order.map((id, i) => [id, i]));
-  return picked.sort((a, b) => {
+  return all.sort((a, b) => {
     const ra = rank.has(a.id) ? rank.get(a.id) : Infinity;
     const rb = rank.has(b.id) ? rank.get(b.id) : Infinity;
     return ra - rb;
@@ -223,6 +351,16 @@ function renderTask(task, byParent, today, into) {
   title.className = 'title';
   title.textContent = task.title || '(untitled)';
   body.appendChild(title);
+
+  // Which task this one hangs off, in the built-in views only -- nothing
+  // else sets parentTitle, since in a real list the nesting already says
+  // it. Above the notes: it is context for the title, not more detail.
+  if (task.parentTitle) {
+    const parent = document.createElement('div');
+    parent.className = 'parent';
+    parent.textContent = 'in ' + task.parentTitle;
+    body.appendChild(parent);
+  }
 
   if (settings.show_notes && task.notes) {
     const notes = document.createElement('div');
@@ -399,6 +537,19 @@ function applySettings(incoming) {
   // larger than the screen with no way to reach a control.
   const scale = Math.min(2.5, Math.max(0.6, Number(settings.scale) || 1));
   root.style.setProperty('--scale', scale);
+  // One column's width. Clamped at the low end because a column narrower
+  // than this wraps every title to one word a line, and at the high end
+  // because six of them have to fit on a screen.
+  //
+  // Divided by the scale, because #shell is zoomed by it: a width written
+  // straight in would come out multiplied on screen, and the number means
+  // real pixels on the desktop. Dividing first cancels the zoom, so the
+  // column is the width that was asked for at any scale -- larger text in
+  // the same column, which is the point of the two settings being
+  // separate. Same for the spacing below.
+  root.style.setProperty('--col-width',
+    Math.min(900, Math.max(160, Number(settings.column_width) || COL_WIDTH))
+    / scale + 'px');
   // Spacing is either one number for all four sides or four of its own,
   // and the page only reads the four. Clamped the same way the scale is:
   // these widen the window, and a window wider than the screen has no
@@ -408,13 +559,65 @@ function applySettings(incoming) {
   const sides = settings.custom_spacing
     ? (settings.spacing_sides || {})
     : null;
-  root.style.setProperty('--spacing', all + 'px');
+  root.style.setProperty('--spacing', all / scale + 'px');
   for (const side of ['left', 'top', 'right', 'bottom']) {
     root.style.setProperty('--spacing-' + side,
-      (sides ? clampPad(sides[side]) : all) + 'px');
+      (sides ? clampPad(sides[side]) : all) / scale + 'px');
   }
 
+  applyColors(settings.colors);
+  applyMetrics(settings.metrics);
+
   applyTranslucency(settings.translucent_background, settings.opacity);
+}
+
+// appearance.json's "colors": the raw palette tokens, per theme. Written
+// as the raw tier (--surface-0-raw and friends) rather than the derived
+// one, exactly like the accent above, so an overridden colour still goes
+// through the translucency layer instead of sitting opaque on top of it.
+//
+// Only the theme in use is written. Writing both would mean every token
+// set twice on one element, with the losing theme's values live in the
+// inline style and the stylesheet's own [data-theme] rules -- which are
+// less specific than an inline style -- unable to win them back on a
+// theme switch.
+function applyColors(colors) {
+  if (!colors) return;
+  const theme = settings.dark_theme ? 'dark' : 'light';
+  const tokens = colors[theme];
+  if (!tokens) return;
+  const root = document.documentElement;
+  for (const [name, value] of Object.entries(tokens)) {
+    if (typeof value === 'string' && value) {
+      root.style.setProperty('--' + name + '-raw', value);
+    }
+  }
+}
+
+// appearance.json's "metrics". Real desktop pixels, so each length is
+// divided by the scale for the same reason --col-width is: #shell is
+// zoomed, and a length written straight in would come out multiplied.
+// task_font_scale is a ratio and so is left alone -- it is meant to track
+// the text around it.
+function applyMetrics(metrics) {
+  if (!metrics) return;
+  const root = document.documentElement;
+  const scale = Number(getComputedStyle(root).getPropertyValue('--scale')) || 1;
+  const px = (name, value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return;
+    root.style.setProperty(name, n / scale + 'px');
+  };
+  for (const [key, name] of [['font_scale', '--font-scale'],
+                             ['task_font_scale', '--task-font-scale']]) {
+    const ratio = Number(metrics[key]);
+    if (Number.isFinite(ratio) && ratio > 0) {
+      root.style.setProperty(name, Math.min(3, ratio));
+    }
+  }
+  px('--task-indent', metrics.task_indent);
+  px('--task-gap', metrics.task_gap);
+  px('--task-top', metrics.task_top);
 }
 
 async function loadSettings() {
@@ -519,10 +722,12 @@ async function load() {
 }
 
 // ----------------------------------------------------- window fit
-// One column's design width, and the gap between columns. Keep in step
+// The default column width and the gap between columns. Keep in step
 // with dashboard.html's --col-width and --col-gap, and with widget.py's
 // WINDOW_WIDTH, which is this number for the single-column default.
-const BASE_WIDTH = 325;
+// COL_WIDTH is only the fallback now -- the live number is the
+// --col-width custom property, which applySettings writes.
+const COL_WIDTH = 325;
 const COL_GAP = 10;
 
 function fitWindowToContent() {
@@ -533,6 +738,9 @@ function fitWindowToContent() {
     // window its own size back and it never shrinks.
     const style = getComputedStyle(document.documentElement);
     const cols = Math.max(1, Number(style.getPropertyValue('--columns')) || 1);
+    // Read back rather than taken from `settings`, so this agrees with
+    // what was actually painted even if the two ever drift.
+    const colWidth = parseFloat(style.getPropertyValue('--col-width')) || COL_WIDTH;
     const scale = Math.max(0.6, Number(style.getPropertyValue('--scale')) || 1);
     // Left and right only: the horizontal padding is what the width has
     // to make room for, and with per-side spacing the two differ.
@@ -541,7 +749,7 @@ function fitWindowToContent() {
     // Multiplied by the scale because zoom changes the painted size, and
     // the window is sized in device pixels.
     const width = Math.ceil(
-      (BASE_WIDTH * cols + COL_GAP * (cols - 1) + pad) * scale);
+      (colWidth * cols + COL_GAP * (cols - 1) + pad) * scale);
     // Height is measured, because only the page knows how many tasks
     // there are. body rather than documentElement: documentElement's
     // scrollHeight has a viewport floor, so it never reports a height
@@ -557,7 +765,12 @@ function fitWindowToContent() {
     const shell = document.getElementById('shell');
     const measured = shell ? shell.getBoundingClientRect().height
                            : document.body.scrollHeight;
-    const height = Math.ceil(measured);
+    // Capped, if a cap is set. The page is not reflowed to match: the
+    // window simply ends, and #shell's overflow:hidden cuts whatever
+    // crosses the edge. A task sliced in half at the bottom is a clearer
+    // signal that there is more below than a clean edge would be.
+    const cap = Math.max(0, Number(settings.max_height) || 0);
+    const height = Math.ceil(cap > 0 ? Math.min(measured, cap) : measured);
 
     if (window.pywebview && window.pywebview.api) {
       // The frameless window has no browser chrome to account for -- the

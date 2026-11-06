@@ -1,20 +1,19 @@
 {
-  "refresh_token": null,
-  "tasklist_ids": [],
+  "accounts": [],
+  "active_account": null,
 
   "port": 5100,
   "fetch_interval_minutes": 15,
   "show_completed": false,
-  "show_notes": true,
-  "group_by_list": true,
+
+  "tasklist_ids": [],
+  "tasklist_order": [],
+  "personalised_lists": true,
+  "personalised_ids": ["due_today"],
 
   "window": {
     "x": 100,
-    "y": 100,
-    "corner_radius": 16,
-    "survive_show_desktop": true,
-    "dark_theme": true,
-    "accent": null
+    "y": 100
   },
 
   "client_id": null,

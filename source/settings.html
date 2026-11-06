@@ -24,22 +24,28 @@
 <title>DesktopTasks Settings</title>
 <link rel="icon" href="logo.png">
 <style>
-  /* The widget's palette, so the settings page and the thing it configures
-     read as one application. Keep in step with dashboard.html. */
+  /* DesktopCards' setup palette, value for value (setup_app.py's :root):
+     --bg becomes --surface-0, --card becomes --surface-1, --card-2 becomes
+     --surface-raise and --line becomes --surface-2. Four tiers rather than
+     the widget's three, because a settings page stacks a control on a card
+     on a page and the widget never does: reusing the page colour for the
+     control, which is what this page did before, made an input read as a
+     hole punched through the card instead of a surface sitting on it. */
   :root {
     color-scheme: light;
-    --surface-0:      #f3f4f6;
+    --surface-0:      #f4f5f7;
     --surface-1:      #ffffff;
-    --surface-2:      #e5e7eb;
-    --text-primary:   #1f2937;
-    --text-secondary: #374151;
-    --text-muted:     #6b7280;
-    --text-faint:     #9ca3af;
-    --accent:         #2f84fc;
+    --surface-raise:  #eceff3;
+    --surface-2:      #dde1e8;
+    --text-primary:   #1b2230;
+    --text-secondary: #3a4254;
+    --text-muted:     #596070;
+    --text-faint:     #878f9d;
+    --accent:         #0b66d0;
     --accent-ink:     #ffffff;
-    --ok:             #15803d;
+    --ok:             #1a8f43;
     --warn:           #b45309;
-    --error:          #dc2626;
+    --error:          #c62828;
     --error-surface:  #fef2f2;
     --radius:         12px;
     /* Wide enough for two cards side by side; the savebar matches it. */
@@ -52,16 +58,18 @@
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --surface-0:      #1d2128;
-    --surface-1:      #292e37;
-    --surface-2:      #3e4651;
-    --text-primary:   #f2f4f7;
-    --text-secondary: #d5dbe3;
-    --text-muted:     #a2abb8;
-    --text-faint:     #7a8391;
-    --ok:             #4ade80;
+    --surface-0:      #15181e;
+    --surface-1:      #1d2128;
+    --surface-raise:  #23272f;
+    --surface-2:      #2d323b;
+    --text-primary:   #e8eaed;
+    --text-secondary: #c3c8d0;
+    --text-muted:     #9aa0a6;
+    --text-faint:     #6b7280;
+    --accent:         #4c8dff;
+    --ok:             #34c759;
     --warn:           #fbbf24;
-    --error:          #fa8585;
+    --error:          #ff6b6b;
     --error-surface:  #43282d;
   }
 
@@ -154,13 +162,20 @@
        into the measured height and inflate the row span. */
     margin-bottom: 0;
   }
+  /* Same heading treatment as DesktopCards' h3.grp: small, uppercase and
+     faint, ruled off from the controls underneath. */
   .card h2 {
-    margin: 0 0 3px;
-    font-size: 14px;
+    margin: 0 0 10px;
+    font-size: 12px;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--surface-2);
   }
   .card .hint {
-    margin: 0 0 14px;
+    margin: -2px 0 14px;
     color: var(--text-muted);
     font-size: 12.5px;
   }
@@ -186,7 +201,7 @@
 
   input[type="number"], input[type="text"] {
     width: 96px;
-    background: var(--surface-0);
+    background: var(--surface-raise);
     border: 1px solid var(--surface-2);
     border-radius: 8px;
     color: var(--text-primary);
@@ -196,7 +211,7 @@
   }
   input[type="color"] {
     width: 42px; height: 30px; padding: 2px;
-    background: var(--surface-0);
+    background: var(--surface-raise);
     border: 1px solid var(--surface-2);
     border-radius: 8px;
     cursor: pointer;
@@ -230,10 +245,10 @@
   .sw input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* --------------------------------------------------------- buttons */
-  button.act {
+  .act {
     appearance: none;
     border: 1px solid var(--surface-2);
-    background: var(--surface-0);
+    background: var(--surface-raise);
     color: var(--text-primary);
     font: inherit;
     font-weight: 500;
@@ -241,15 +256,64 @@
     border-radius: 9px;
     cursor: pointer;
   }
-  button.act:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  button.act.primary {
+  .act:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .act.primary {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--accent-ink);
   }
-  button.act.primary:hover:not(:disabled) { filter: brightness(1.08); color: var(--accent-ink); }
-  button.act:disabled { opacity: .5; cursor: default; }
-  button.act { white-space: nowrap; }
+  .act.primary:hover:not(:disabled) { filter: brightness(1.08); color: var(--accent-ink); }
+  .act:disabled { opacity: .5; cursor: default; }
+  .act { white-space: nowrap; }
+  /* Not red: it is reversible until Save, and a red button in a savebar
+     reads as "delete everything". Muted, and out on its own on the left. */
+  .act.danger { color: var(--text-secondary); }
+  .act.danger:hover { color: var(--error); border-color: var(--error); }
+  .act[hidden] { display: none; }
+  /* Edit tasks is a real link, not a button that calls window.open: it
+     goes to one fixed URL, so middle-click and Open in new window should
+     work the way they do on any other link. These three rules are all it
+     takes to make an <a> sit level with a <button>. */
+  a.act { display: inline-block; text-decoration: none; line-height: normal; }
+  .btnrow { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  /* ------------------------------------------------- account switch */
+  select {
+    background: var(--surface-raise);
+    border: 1px solid var(--surface-2);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font: inherit;
+    padding: 6px 9px;
+    max-width: 230px;
+    cursor: pointer;
+  }
+  /* The "Reload recommended" notice after a switch. It pulses twice and
+     then sits still: a thing that never stops moving stops being read,
+     but the switch happens under the cursor and a static line right
+     where the click was is easy to miss entirely. */
+  .flash {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 12px 0 14px;
+    padding: 9px 11px;
+    border: 1px solid var(--warn);
+    border-radius: 9px;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    animation: flash 1s ease-in-out 2;
+  }
+  /* display on the class beats the hidden attribute's UA rule, so both
+     of these say it again. The same trap as .act[hidden] above. */
+  .flash[hidden], .fld[hidden] { display: none; }
+  .flash .star { color: var(--warn); }
+  .flash .act { padding: 4px 10px; font-size: 12.5px; }
+  @keyframes flash {
+    0%, 100% { background: transparent; }
+    50%      { background: color-mix(in srgb, var(--warn) 18%, transparent); }
+  }
+  /* Respect the OS setting: the notice still needs to be noticed, so it
+     keeps the border and loses only the motion. */
+  @media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
 
   /* ---------------------------------------------------------- status */
   .status { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
@@ -274,10 +338,25 @@
     display: flex; align-items: center; gap: 10px;
     padding: 7px 9px; border-radius: 9px;
   }
-  .lrow:hover { background: var(--surface-0); }
+  .lrow:hover { background: var(--surface-raise); }
   .lrow input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
   .lrow label { flex: 1; cursor: pointer; min-width: 0; }
   .lrow .n { color: var(--text-faint); font-size: 12.5px; }
+
+  /* A heading inside a card, for the built-in views under the real
+     lists. Lighter than the card's own h2 -- it is a part of this card,
+     not another card. */
+  .subh {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin: 16px 0 0; padding-top: 12px;
+    border-top: 1px solid var(--surface-2);
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--text-faint);
+  }
+  .subhint { margin: 4px 0 8px !important; }
+  /* Switched off, the views stay on screen and stop responding, so what
+     the switch controls is visible before you turn it on. */
+  .lists.off { opacity: .45; pointer-events: none; }
 
   .empty { color: var(--text-faint); font-size: 13px; padding: 4px 0; }
 
@@ -286,7 +365,7 @@
   .orow {
     display: flex; align-items: center; gap: 10px;
     padding: 8px 10px;
-    background: var(--surface-0);
+    background: var(--surface-raise);
     border: 1px solid var(--surface-2);
     border-radius: 9px;
     cursor: grab;
@@ -299,6 +378,17 @@
   .orow .col {
     color: var(--text-faint); font-size: 12px; flex: none;
     font-variant-numeric: tabular-nums;
+  }
+  /* A list that is in the order but not ticked on Account. Faded, the way
+     DesktopCards fades a hidden account in its own sortable list, and
+     still fully draggable -- the whole point of keeping it here is that
+     you can park it where you want it for when you tick it back on. */
+  .orow.off { opacity: .45; }
+  .orow .why {
+    flex: none; font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--text-faint);
+    border: 1px solid var(--surface-2); border-radius: 999px;
+    padding: 1px 7px; white-space: nowrap;
   }
   .orow .mv {
     appearance: none; border: 0; background: none; cursor: pointer;
@@ -369,7 +459,7 @@
     <img src="logo.png" alt="">
     <h1>DesktopTasks</h1>
   </header>
-  <p class="sub">Settings. Saving applies them to the widget straight away.</p>
+  <p class="sub">Saving applies to the widget straight away.</p>
 
   <div class="tabs" role="tablist">
     <button class="tab on" data-tab="accounts" role="tab">Account</button>
@@ -390,9 +480,45 @@
       </div>
       <div class="notice" id="conn-notice" hidden></div>
 
-      <button class="act primary" id="connect">Reconnect Google</button>
+      <!-- Hidden with one account: a dropdown you cannot change is just
+           a restatement of the status line above it. -->
+      <div class="fld" id="account-row" hidden>
+        <span class="lab">
+          <b>Account</b>
+          <span>Only this account is fetched. Takes effect on Save.</span>
+        </span>
+        <select id="account"></select>
+      </div>
+      <!-- The flash carries the fix rather than only the warning: the
+           whole message is "these tasks are the wrong account's", and
+           the only useful response to it is one fetch. -->
+      <p class="flash" id="account-flash" hidden>
+        <span>Reload recommended<span class="star">*</span> —
+          <span id="account-when"></span>
+          <span id="account-age"></span></span>
+        <button class="act" id="account-reload" type="button">Reload now</button>
+      </p>
+
+      <div class="btnrow">
+        <button class="act primary" id="connect">Reconnect Google</button>
+        <!-- Hidden until there is an account to edit. Google Tasks on the
+             web is where you actually change a task; this app only reads
+             them, which the hint above says, so the button that completes
+             the thought belongs right here. -->
+        <a class="act" id="edit-tasks" href="https://tasks.google.com/"
+           target="_blank" rel="noopener" hidden>Edit tasks</a>
+        <!-- Muted rather than red, and last in the row, for the same
+             reason Reset to default is: it is the one button here that
+             throws something away, so it should be the hardest to hit
+             by accident without being alarming to look at. -->
+        <button class="act danger" id="remove-account" type="button" hidden>
+          Remove account
+        </button>
+      </div>
       <p class="hint" id="connect-hint" style="margin-top:10px;margin-bottom:0">
-        Opens Google's sign-in page in a new tab.
+        Opens Google's sign-in in a new tab. Leave every consent box
+        ticked &mdash; without <b>See your tasks</b> the sign-in cannot
+        read anything, and the widget only finds out on the next fetch.
       </p>
     </div>
 
@@ -404,10 +530,22 @@
     <div class="card" data-col="2">
       <h2>Task lists</h2>
       <p class="hint">
-        Which lists appear in the widget. With none ticked, every list is
-        shown.
+        Which lists appear in the widget. None ticked shows them all.
       </p>
       <div class="lists" id="lists"></div>
+
+      <!-- The built-in views. A sub-section rather than more rows in the
+           list above, because these are not lists Google has: they are
+           assembled here out of the tasks those lists hold. -->
+      <div class="subh">
+        <span>Personalised lists</span>
+        <label class="sw"><input type="checkbox" id="personalised_lists"><i></i></label>
+      </div>
+      <p class="hint subhint">
+        Built from every list above, ticked or not, so a task can appear
+        twice. They sit in the Order with everything else.
+      </p>
+      <div class="lists" id="views"></div>
     </div>
 
     <div class="card">
@@ -415,14 +553,13 @@
       <div class="fld">
         <span class="lab">
           <b>Refresh every</b>
-          <span>Minutes between fetches. Applies after a Restart.</span>
+          <span>Applies after a Restart.</span>
         </span>
         <input type="number" id="fetch_interval_minutes" min="1" max="1440">
       </div>
       <div class="fld">
         <span class="lab">
           <b>Show completed tasks</b>
-          <span>Off keeps the widget to what is still open.</span>
         </span>
         <label class="sw"><input type="checkbox" id="show_completed"><i></i></label>
       </div>
@@ -445,7 +582,7 @@
       <div class="fld">
         <span class="lab">
           <b>Show notes</b>
-          <span>Task notes under the title, clamped to two lines.</span>
+          <span>Under the title, clamped to two lines.</span>
         </span>
         <label class="sw"><input type="checkbox" id="show_notes"><i></i></label>
       </div>
@@ -454,9 +591,8 @@
     <div class="card">
       <h2>Columns</h2>
       <p class="hint">
-        Lists are dealt across the columns in turn, so column one takes the
-        first list, column two the second, and round again. The window
-        widens to fit.
+        Lists are dealt across the columns in turn. The window widens to
+        fit.
       </p>
       <div class="fld">
         <span class="lab">
@@ -474,10 +610,9 @@
         <span class="lab">
           <b>Maximum tasks shown</b>
           <span>
-            Caps the window height. 0 draws everything, which on a long
-            list runs off the bottom of the screen: a window pinned to the
-            desktop cannot grow past the screen height, and there is
-            nothing to scroll. Anything left out is counted at the bottom.
+            0 draws everything, which a long list runs off the bottom of
+            the screen with &mdash; a pinned window cannot scroll.
+            Whatever is left out is counted at the bottom.
           </span>
         </span>
         <span class="rng">
@@ -496,8 +631,9 @@
     <div class="card wide" data-last>
       <h2>Order</h2>
       <p class="hint">
-        Drag to reorder, or use the arrows. This is the order lists are
-        dealt into the columns.
+        Drag or use the arrows. This is the order lists are dealt into
+        the columns. Unticked lists stay here, faded, keeping their place
+        for when you tick them back.
       </p>
       <div class="order" id="order"></div>
     </div>
@@ -508,23 +644,65 @@
   <section class="panel" data-panel="appearance">
 
     <div class="card">
-      <h2>Theme</h2>
+      <h2>Theme and translucency</h2>
       <div class="fld">
         <span class="lab">
           <b>Dark</b>
-          <span>Off uses the light palette.</span>
         </span>
         <label class="sw"><input type="checkbox" id="dark_theme"><i></i></label>
       </div>
       <div class="fld">
         <span class="lab">
           <b>Accent colour</b>
-          <span>Used by the tray icon. Clear it to follow Windows.</span>
+          <span>Also the tray icon.</span>
         </span>
         <span style="display:flex;gap:8px;align-items:center">
           <input type="color" id="accent_color">
           <button class="act" id="accent_clear" type="button">Use Windows</button>
         </span>
+      </div>
+      <div class="fld">
+        <span class="lab">
+          <b>See-through background</b>
+          <span>Lets the wallpaper through. Applies after a Restart.</span>
+        </span>
+        <label class="sw"><input type="checkbox" id="translucent_background"><i></i></label>
+      </div>
+      <div class="fld">
+        <span class="lab">
+          <b>Opacity</b>
+          <span>Text stays more solid than the background.</span>
+        </span>
+        <span class="rng">
+          <input type="range" id="opacity" min="0.15" max="1" step="0.01">
+          <input type="number" class="num" id="opacity-num" min="15" max="100" step="1"
+                 aria-label="Opacity, percent">
+          <span class="unit" id="opacity-unit"></span>
+        </span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Dimensions</h2>
+      <p class="hint">
+        How much of the desktop the widget may take, in real pixels.
+        Scale does not change these.
+      </p>
+      <div class="fld">
+        <span class="lab">
+          <b>Column width</b>
+          <span>Narrower wraps titles onto more lines rather than
+            cutting them off.</span>
+        </span>
+        <input type="number" id="column_width" min="160" max="900" step="5">
+      </div>
+      <div class="fld">
+        <span class="lab">
+          <b>Max height</b>
+          <span>0 grows to fit every task. Anything else stops there,
+            cutting off mid-task.</span>
+        </span>
+        <input type="number" id="max_height" min="0" max="4000" step="10">
       </div>
     </div>
 
@@ -533,7 +711,8 @@
       <div class="fld">
         <span class="lab">
           <b>Scale</b>
-          <span>Everything larger or smaller. The window follows.</span>
+          <span>Text and cards larger or smaller. The dimensions and
+            spacing below stay as set.</span>
         </span>
         <span class="rng">
           <input type="range" id="scale" min="0.6" max="2.5" step="0.05">
@@ -545,7 +724,7 @@
       <div class="fld">
         <span class="lab">
           <b>Breathing room</b>
-          <span>Extra padding around the edges, in pixels.</span>
+          <span>Padding around the edges.</span>
         </span>
         <span class="rng">
           <input type="range" id="spacing" min="0" max="60" step="1">
@@ -557,7 +736,7 @@
       <div class="fld">
         <span class="lab">
           <b>Use per-side spacing instead</b>
-          <span>Set left, top, right and bottom separately.</span>
+          <span>Left, top, right and bottom separately.</span>
         </span>
         <label class="sw"><input type="checkbox" id="custom_spacing"><i></i></label>
       </div>
@@ -582,36 +761,9 @@
       <div class="fld">
         <span class="lab">
           <b>Corner radius</b>
-          <span>Pixels. 0 is a square window. Applies after a Restart.</span>
+          <span>0 is a square window. Applies after a Restart.</span>
         </span>
         <input type="number" id="corner_radius" min="0" max="80">
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Translucency</h2>
-      <p class="hint">
-        Lets the wallpaper through. The window itself has to be
-        transparent for this, so it applies after a Restart.
-      </p>
-      <div class="fld">
-        <span class="lab">
-          <b>See-through background</b>
-          <span>Off is cheaper and is the default.</span>
-        </span>
-        <label class="sw"><input type="checkbox" id="translucent_background"><i></i></label>
-      </div>
-      <div class="fld">
-        <span class="lab">
-          <b>Opacity</b>
-          <span>Text stays more solid than the background behind it.</span>
-        </span>
-        <span class="rng">
-          <input type="range" id="opacity" min="0.15" max="1" step="0.01">
-          <input type="number" class="num" id="opacity-num" min="15" max="100" step="1"
-                 aria-label="Opacity, percent">
-          <span class="unit" id="opacity-unit"></span>
-        </span>
       </div>
     </div>
 
@@ -619,22 +771,66 @@
       <h2>Position</h2>
       <p class="hint">Where the widget sits. Applies after a Restart.</p>
       <div class="fld">
-        <span class="lab"><b>From the left</b><span>Pixels.</span></span>
+        <span class="lab"><b>From the left</b></span>
         <input type="number" id="win_x" min="0" max="20000">
       </div>
       <div class="fld">
-        <span class="lab"><b>From the top</b><span>Pixels.</span></span>
+        <span class="lab"><b>From the top</b></span>
         <input type="number" id="win_y" min="0" max="20000">
       </div>
       <div class="fld">
         <span class="lab">
           <b>Pin to the desktop</b>
           <span>
-            Survives Win+D and never appears in the taskbar. Turning this
-            off makes it an ordinary floating window.
+            Survives Win+D and stays out of the taskbar. Off makes it an
+            ordinary floating window.
           </span>
         </span>
         <label class="sw"><input type="checkbox" id="survive_show_desktop"><i></i></label>
+      </div>
+    </div>
+
+    <!-- Not from config.json: these three are .lnk files on disk. They
+         follow the tab's rule anyway -- a tick is pending until Save, so
+         a stray click is undone by not saving. -->
+    <div class="card">
+      <h2>Windows shortcuts</h2>
+      <p class="hint">
+        Where DesktopTasks can be started from. Ticking one writes a
+        shortcut; unticking it deletes the shortcut and nothing else.
+      </p>
+      <p class="hint" id="sc_unavailable" hidden>
+        Shortcuts need Windows, and this copy could not reach the
+        Windows calls that write them.
+      </p>
+      <div class="fld">
+        <span class="lab">
+          <b>Start with Windows</b>
+          <span id="sc_startup_dir"></span>
+        </span>
+        <label class="sw"><input type="checkbox" id="sc_startup"><i></i></label>
+      </div>
+      <div class="fld">
+        <span class="lab">
+          <b>Start menu</b>
+          <span id="sc_start_menu_dir"></span>
+        </span>
+        <label class="sw"><input type="checkbox" id="sc_start_menu"><i></i></label>
+      </div>
+      <div class="fld">
+        <span class="lab">
+          <b>Desktop shortcut</b>
+          <span id="sc_desktop_dir"></span>
+        </span>
+        <label class="sw"><input type="checkbox" id="sc_desktop"><i></i></label>
+      </div>
+      <!-- Writes all three to match the switches above, right now,
+           without waiting for a Save. The one case for it is a shortcut
+           that already exists but points at the wrong place, which the
+           switches cannot express: it is already ticked, so Save sees
+           nothing to do. -->
+      <div class="btnrow">
+        <button class="act" id="sc_redo" type="button">Redo shortcuts</button>
       </div>
     </div>
 
@@ -644,8 +840,12 @@
 
 <div class="savebar">
   <div class="inner">
+    <!-- Left of the message, so it reads as undo rather than as another
+         way to commit. Shown only on Appearance -- it resets the look,
+         not the account or the task selection. -->
+    <button class="act danger" id="reset" hidden>Reset to default</button>
     <span class="msg" id="msg"></span>
-    <button class="act" id="reload">Reload widget</button>
+    <button class="act" id="restart">Restart widget</button>
     <button class="act primary" id="save" disabled>Save</button>
   </div>
 </div>

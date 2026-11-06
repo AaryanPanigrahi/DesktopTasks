@@ -1,0 +1,58 @@
+{
+  "dark_theme": true,
+  "accent": null,
+  "corner_radius": 16,
+  "survive_show_desktop": true,
+  "columns": 1,
+  "column_width": 325,
+  "max_height": 0,
+  "max_tasks": 0,
+  "scale": 1.0,
+  "spacing": 0,
+  "custom_spacing": false,
+  "spacing_sides": {
+    "left": 0,
+    "top": 0,
+    "right": 0,
+    "bottom": 0
+  },
+  "opacity": 1.0,
+  "translucent_background": false,
+  "show_notes": true,
+  "group_by_list": true,
+  "colors": {
+    "light": {
+      "surface-0": "#f3f4f6",
+      "surface-1": "#ffffff",
+      "surface-2": "#e5e7eb",
+      "text-primary": "#1f2937",
+      "text-secondary": "#374151",
+      "text-muted": "#6b7280",
+      "text-faint": "#9ca3af",
+      "error": "#ef4444",
+      "error-surface": "#fef2f2",
+      "overdue": "#dc2626",
+      "today": "#b45309"
+    },
+    "dark": {
+      "surface-0": "#1d2128",
+      "surface-1": "#292e37",
+      "surface-2": "#3e4651",
+      "text-primary": "#f2f4f7",
+      "text-secondary": "#d5dbe3",
+      "text-muted": "#a2abb8",
+      "text-faint": "#7a8391",
+      "error": "#fa8585",
+      "error-surface": "#43282d",
+      "overdue": "#f87171",
+      "today": "#fbbf24"
+    }
+  },
+  "metrics": {
+    "font_scale": 1.0,
+    "task_font_scale": 0.95,
+    "task_indent": 24,
+    "task_gap": 6,
+    "task_top": 7
+  }
+}

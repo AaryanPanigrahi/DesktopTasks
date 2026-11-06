@@ -3,6 +3,12 @@
 # it into is not tracked, because it ends up holding your refresh token.
 config/config.json
 
+# How the widget looks, split out of config.json the way DesktopCards does
+# it. No secrets in it, but it is still yours rather than the project's --
+# your colours, your spacing. appearance.example.json is the tracked
+# template.
+config/appearance.json
+
 # The OAuth client that release builds sign in with. Not committed, but
 # bundled into the exe at build time, so a downloaded release needs no
 # Cloud console while a clone brings its own client. The tracked template
@@ -51,3 +57,7 @@ changes.txt
 .trail/
 /graft/
 /.ignore
+
+# Scratch UI reference snippets pulled from Chakra docs while laying out the
+# settings page. Local scratch, not part of the app.
+newUI/

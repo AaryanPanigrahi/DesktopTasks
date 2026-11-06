@@ -15,6 +15,7 @@ here is cached.
 """
 
 import datetime
+import hashlib
 import json
 import os
 import sys
@@ -33,6 +34,8 @@ except ImportError:
         CLIENT_ID = None
         CLIENT_SECRET = None
 
+import appearance  # noqa: E402  (grouped with the app's own imports)
+
 # Paths all come from paths.py, which is the only module that knows the
 # difference between a source run and a frozen one. Nothing here derives a
 # path from __file__ -- under PyInstaller that lands in a temp directory
@@ -41,6 +44,7 @@ except ImportError:
 # Re-exported rather than used directly so that google_tasks_setup.py can
 # keep importing them from here, which is where its credentials live.
 from paths import (  # noqa: E402  (grouped with the app's own imports)
+    CACHE_DIR,
     CONFIG_DIR,
     CONFIG_PATH,
     LOOPBACK,
@@ -55,7 +59,14 @@ API_BASE = "https://tasks.googleapis.com/tasks/v1"
 # .../auth/tasks is not a code change here, but it does mean re-running the
 # setup script, because a refresh token only carries the scopes that were
 # consented to when it was issued.
-SCOPE = "https://www.googleapis.com/auth/tasks.readonly"
+#
+# openid and email are here only so the account switcher can label a
+# dropdown entry with the address it belongs to. "Account 1 / Account 2"
+# was the alternative and it is unusable the moment the two accounts are
+# a personal and a work one. Nothing else reads the address, and it never
+# leaves this machine.
+TASKS_SCOPE = "https://www.googleapis.com/auth/tasks.readonly"
+SCOPE = TASKS_SCOPE + " openid email"
 
 # maxResults is capped at 100 by the API regardless of what we ask for, so
 # this is the page size, not a limit on what gets fetched -- list_tasks()
@@ -91,13 +102,128 @@ def load_settings():
     Missing is not an error: every key here has a sane default, so a fresh
     clone fetches correctly before anyone has copied a template."""
     settings = load_json(CONFIG_PATH, default={}) or {}
+    # show_notes and group_by_list are look-and-feel, so they live in
+    # appearance.json now. Read from there rather than from config.json,
+    # and only for those two -- load_config/save_config below must keep
+    # seeing config.json alone, or a save would write the appearance keys
+    # straight back into the file they were just moved out of.
+    look = appearance.read()
     return {
         "port": settings.get("port", 5100),
         "show_completed": settings.get("show_completed", False),
         "fetch_interval_minutes": settings.get("fetch_interval_minutes", 15),
-        "show_notes": settings.get("show_notes", True),
-        "group_by_list": settings.get("group_by_list", True),
+        "show_notes": look.get("show_notes", True),
+        "group_by_list": look.get("group_by_list", True),
     }
+
+
+# The per-account keys. Everything else in config.json is one setting for
+# the whole widget; these three belong to whichever Google account is
+# signed in, because a task list id from one account means nothing in
+# another and a selection carried across would silently show no lists.
+ACCOUNT_KEYS = ("refresh_token", "tasklist_ids", "tasklist_order")
+
+
+def accounts(cfg):
+    """Every signed-in account, oldest first, migrating a legacy config.
+
+    Before the switcher there was one account, stored as a bare
+    refresh_token at the top level. That config still exists on every
+    machine that has been running this, so it is folded into a
+    one-element list here rather than requiring anyone to sign in again.
+    The fold is in memory; it reaches disk the next time anything saves.
+
+    No email on the migrated one: the address comes from the `openid
+    email` scope, which the old token was never issued with. It shows as
+    "Google account" until the next reconnect fills it in."""
+    saved = cfg.get("accounts")
+    if isinstance(saved, list) and saved:
+        return saved
+    if not cfg.get("refresh_token"):
+        return []
+    return [{
+        "id": "legacy",
+        "email": "",
+        **{k: cfg.get(k) for k in ACCOUNT_KEYS},
+    }]
+
+
+def active_account(cfg):
+    """The account the widget currently fetches, or None if there is none.
+
+    active_account naming an account that has since been removed falls
+    back to the first one rather than to nothing: an unreadable id in a
+    hand-edited config should not look like being signed out."""
+    accs = accounts(cfg)
+    if not accs:
+        return None
+    wanted = cfg.get("active_account")
+    for acc in accs:
+        if acc.get("id") == wanted:
+            return acc
+    return accs[0]
+
+
+def account_label(acc):
+    """What the dropdown calls it."""
+    return (acc or {}).get("email") or "Google account"
+
+
+def account_tasks_path(account_id):
+    """Where this account's last fetch is kept while another is active.
+
+    tasks.json stays the one file the widget and the settings page read --
+    neither of them should have to know what an account is -- and this is
+    the shelf the inactive accounts' copies sit on. Switching swaps the
+    two, so a switch shows that account's tasks straight away instead of
+    the other account's until the next fetch.
+
+    Named by a hash rather than by the id, because the id is an email
+    address and an email address has no business being a filename: it
+    would put the user's address in a directory listing and it would
+    need escaping on Windows anyway."""
+    digest = hashlib.sha1((account_id or "").encode("utf-8")).hexdigest()[:12]
+    return os.path.join(CACHE_DIR, f"tasks-{digest}.json")
+
+
+def stash_tasks(account_id):
+    """Copies the live tasks.json onto that account's shelf."""
+    if not account_id:
+        return
+    data = load_json(TASKS_PATH, default=None)
+    if data is None:
+        return
+    # Same stamp check as restore_tasks, from the other side: shelving a
+    # file that belongs to a different account would plant the mismatch
+    # rather than catch it.
+    if data.get("account") not in (None, account_id):
+        return
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(account_tasks_path(account_id), "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def restore_tasks(account_id):
+    """Puts that account's shelved tasks back as the live tasks.json.
+
+    Returns whether there were any. A first switch to a freshly added
+    account has nothing shelved, and the live file is emptied rather than
+    left alone: showing the previous account's tasks under this one's
+    name is worse than showing none and saying so."""
+    data = load_json(account_tasks_path(account_id), default=None)
+    # A shelf stamped with a different account is not this account's
+    # tasks, whatever its filename says. It can only happen if a fetch
+    # ran under a token that turned out to belong to someone else --
+    # which is exactly what the account-clobbering bug used to cause --
+    # and showing it would be the failure this stamp exists to prevent.
+    if data is not None and data.get("account") not in (None, account_id):
+        data = None
+    ensure_data_dir()
+    with open(TASKS_PATH, "w") as f:
+        json.dump(data if data is not None else
+                  {"last_updated": None, "account": account_id,
+                   "lists": [], "errors": []}, f, indent=2)
+    return data is not None
 
 
 def load_config():
@@ -113,6 +239,20 @@ def load_config():
     if not cfg.get("client_id") and oauth_client.CLIENT_ID:
         cfg["client_id"] = oauth_client.CLIENT_ID
         cfg["client_secret"] = oauth_client.CLIENT_SECRET
+
+    # The active account's keys are lifted to the top level, which is
+    # where every reader of this config already looks for them. That is
+    # the whole trick behind multiple accounts: the fetcher, the token
+    # refresh and the settings page were all written against one
+    # refresh_token and one tasklist_ids, and none of them had to change
+    # -- switching accounts just changes which account's values get
+    # lifted here. save_config puts them back where they came from.
+    acc = active_account(cfg)
+    if acc:
+        cfg["active_account"] = acc.get("id")
+        cfg["refresh_token"] = acc.get("refresh_token")
+        cfg["tasklist_ids"] = acc.get("tasklist_ids") or []
+        cfg["tasklist_order"] = acc.get("tasklist_order") or []
     return cfg
 
 
@@ -122,6 +262,26 @@ def save_config(cfg):
     Stripping the defaults matters: baked in once, a rotated client in a
     future release would be silently overridden by the stale copy on disk."""
     cfg = dict(cfg)
+
+    # The mirror of the lift in load_config: whatever the caller changed
+    # at the top level goes back onto the account it belongs to, and the
+    # top-level copies are dropped so there is exactly one home for each.
+    # Without this, saving a task selection on account B would leave a
+    # stale tasklist_ids at the top level that outranks nothing and
+    # confuses everything.
+    accs = [dict(a) for a in accounts(cfg)]
+    if accs:
+        acc = active_account(cfg) or accs[0]
+        for saved in accs:
+            if saved.get("id") == acc.get("id"):
+                for key in ACCOUNT_KEYS:
+                    if key in cfg:
+                        saved[key] = cfg[key]
+        cfg["accounts"] = accs
+        cfg["active_account"] = acc.get("id")
+        for key in ACCOUNT_KEYS:
+            cfg.pop(key, None)
+
     if oauth_client.CLIENT_ID and cfg.get("client_id") == oauth_client.CLIENT_ID:
         cfg["client_id"] = None
         cfg["client_secret"] = None
@@ -137,7 +297,10 @@ def is_configured():
     credentials ship with the app, so their presence says nothing about
     whether anyone has signed in."""
     cfg = load_json(CONFIG_PATH, default={}) or {}
-    return bool(cfg.get("refresh_token"))
+    # Through accounts(), so a config written since the switcher landed --
+    # where the token lives inside the accounts list and not at the top
+    # level -- still reads as configured.
+    return any(a.get("refresh_token") for a in accounts(cfg))
 
 
 def post_form(url, fields):
@@ -241,15 +404,26 @@ def list_tasks(token, tasklist_id, show_completed=False):
             return out
 
 
-def write_tasks(lists, errors):
+def write_tasks(lists, errors, account_id=None):
     data = {
         "last_updated": datetime.datetime.now().isoformat(),
+        # Whose tasks these are. Stamped so that nothing downstream has
+        # to infer it from timing: a file that says it belongs to another
+        # account is discarded rather than drawn, which is the one way to
+        # be sure the widget never shows account A's tasks under account
+        # B's name. Absent in a file written before the switcher existed,
+        # which readers treat as "the active account's".
+        "account": account_id,
         "lists": lists,
         "errors": errors,
     }
     ensure_data_dir()
     with open(TASKS_PATH, "w") as f:
         json.dump(data, f, indent=2)
+    # And onto the active account's shelf, so switching away and back
+    # finds this fetch rather than whatever was there before it.
+    if account_id:
+        stash_tasks(account_id)
     return data
 
 
@@ -276,6 +450,7 @@ def main():
 
 def _main():
     gcfg = load_config()
+    account_id = gcfg.get("active_account")
     if not gcfg.get("refresh_token"):
         sys.exit(
             "No Google account connected. Run google_tasks_setup.py to "
@@ -292,22 +467,24 @@ def _main():
         # fresh setup writes. Narrowing it is how you keep one shopping list
         # off a desktop that is mostly for work.
         #
-        # Every list the account has is recorded, chosen or not, and only
-        # the chosen ones have their tasks fetched. Writing just the chosen
-        # ones was a dead end: the settings page reads its checkboxes from
-        # this file, so narrowing the selection deleted the other lists from
-        # the page and there was no way left to tick them again. An unchosen
-        # list costs one line here and no API call.
+        # Every list the account has is fetched, chosen or not, and
+        # `selected` records which of them the widget is allowed to draw
+        # as a card. Writing only the chosen lists was a dead end twice
+        # over: the settings page reads its checkboxes from this file, so
+        # narrowing the selection deleted the other lists from the page
+        # with no way left to tick them back -- and the personalised
+        # lists read across everything, so a view called "Due today" that
+        # quietly skipped half the account would be worse than no view.
+        #
+        # The cost is one API call per unchosen list per fetch, against a
+        # free, generously limited API, on a timer measured in minutes.
         lists = [
             {
                 "id": tl.get("id"),
                 "title": tl.get("title") or "Tasks",
                 "selected": not only or tl.get("id") in only,
-                "tasks": (
-                    list_tasks(token, tl.get("id"), settings["show_completed"])
-                    if not only or tl.get("id") in only
-                    else []
-                ),
+                "tasks": list_tasks(token, tl.get("id"),
+                                    settings["show_completed"]),
             }
             for tl in tasklists
         ]
@@ -328,22 +505,36 @@ def _main():
                     "error_message": "Google sign-in expired. Reconnect Google Tasks.",
                 }
             ],
+            account_id,
         )
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
         print(f"[google_tasks] fetch failed: {e}", file=sys.stderr)
+        # 403 from the Tasks API with a token that refreshed fine is
+        # almost always one thing: the consent screen's "See your tasks"
+        # checkbox was left unticked. Google issues the token anyway --
+        # it just carries no Tasks scope -- so the failure lands here,
+        # one API call later, as a bare "Forbidden" that says nothing
+        # about the checkbox. Hence the spelled-out message.
+        forbidden = isinstance(e, urllib.error.HTTPError) and e.code == 403
         return write_tasks(
             previous_lists(),
             [
                 {
-                    "error_code": "FETCH_FAILED",
-                    "error_message": f"Could not reach Google Tasks ({e}).",
+                    "error_code": "NO_TASKS_SCOPE" if forbidden else "FETCH_FAILED",
+                    "error_message": (
+                        "Google did not grant permission to read your tasks. "
+                        "Reconnect, and leave every box on the consent screen "
+                        "ticked -- unticking \"See your tasks\" is what causes "
+                        "this."
+                    ) if forbidden else f"Could not reach Google Tasks ({e}).",
                 }
             ],
+            account_id,
         )
 
     total = sum(len(lst["tasks"]) for lst in lists)
     shown = sum(1 for lst in lists if lst["selected"])
-    data = write_tasks(lists, [])
+    data = write_tasks(lists, [], account_id)
     print(
         f"Wrote {total} tasks across {shown} of {len(lists)} lists to "
         f"config/tasks.json"

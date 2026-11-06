@@ -20,6 +20,9 @@ every decision that isn't obvious from reading the code.
 
 - Pulls every task list and its open tasks from Google Tasks, and writes
   `config/tasks.json`.
+- Holds more than one Google account, fetches only the active one, and
+  switches between them from the settings page. See
+  [Several Google accounts](#several-google-accounts).
 - Shows each list as a card, with subtasks nested under their parents in
   Google's own ordering.
 - Calls out **overdue** and **today** in colour, and reads dates the way a
@@ -27,6 +30,13 @@ every decision that isn't obvious from reading the code.
   `Oct 10 · 6 days ago` once something has been overdue a while.
 - Shows task notes, clamped to two lines so one pasted essay can't push
   everything else off the widget.
+- Assembles built-in views -- Due today, Overdue, Due this week, Due in
+  order, No due date -- out of the tasks it already has, and draws the
+  ones you tick as cards of their own. See
+  [Personalised lists](#personalised-lists).
+- Deals the lists across one or more columns, in an order you drag, and
+  bounds itself with a column width, a height cap and a limit on how many
+  task rows it will draw.
 - Sits pinned to a fixed spot as a frameless window with no taskbar icon
   and no Alt+Tab entry, and stays visible through Win+D ("show desktop").
 - Sizes itself to its content after every render, so the window grows and
@@ -44,6 +54,10 @@ every decision that isn't obvious from reading the code.
 - Counts down the minutes until the next scheduled refresh next to the
   time of the last one.
 
+- Installs itself, with a Start-menu entry, an optional Startup shortcut
+  and an entry in Settings > Apps, all per-user and none of it needing
+  administrator. See [What setup does](#what-setup-does).
+
 A list with nothing open reads **All clear** rather than rendering an empty
 card that looks like a failure.
 
@@ -51,13 +65,32 @@ card that looks like a failure.
 
 ## Getting started
 
-No release has been published yet, so this runs from source.
+Two routes, and they install nothing in common: an installed app comes from
+the built exe, a checkout runs in place. See
+[Three names, one binary](#three-names-one-binary) for how the built one
+is packaged, and [What setup does](#what-setup-does) for what installing
+actually writes.
+
+No release has been published yet, so the installed route means building
+the installer yourself:
 
 ```
-cp config/config.example.json config/config.json   # defaults are fine
-python source/google_tasks_setup.py                # sign in to Google
-python source/desktoptasks.py                      # run the widget
+pip install -r requirements.txt
+pip install pyinstaller
+python source/build.py          # writes dist/DesktopTasks-Setup.exe
 ```
+
+From source:
+
+```
+pip install -r requirements.txt
+cp config/config.example.json config/config.json   # defaults are fine
+python source/desktoptasks.py --connect            # sign in to Google
+pythonw source/desktoptasks.py                     # run the widget
+```
+
+`python source/google_tasks_setup.py` is the same sign-in, one layer
+down; `--connect` is the form that also works from the frozen exe.
 
 A clone needs a Google OAuth client of its own. The one a release would
 bundle is deliberately not in the repo. See
@@ -71,7 +104,15 @@ bundle is deliberately not in the repo. See
 | `desktoptasks.py --fetch` | One fetch, then exit |
 | `desktoptasks.py --connect` | Sign in to Google. Takes an optional `client_secret.json` |
 | `desktoptasks.py --serve` | Just the HTTP server, for working on the page in a normal browser tab |
+| `desktoptasks.py --setup` | Install it, with shortcuts. What `DesktopTasks-Setup.exe` runs |
+| `desktoptasks.py --uninstall` | Remove it, its shortcuts and its data. What `Uninstall.exe` runs |
 | `desktoptasks.py --help` | The above |
+
+The last two are also selected by the **exe's filename**, which is what
+makes one downloaded file land in setup rather than in a widget nobody
+installed. See [Three names, one binary](#three-names-one-binary). From
+source the filename never matches, so a checkout only reaches them
+through the flags.
 
 Imports live inside each branch rather than at the top of the file. The
 widget pulls in pywebview, pythonnet and the whole .NET interop layer, and
@@ -89,32 +130,37 @@ at the repo root. Paths are given bare for readability.
 | File | Role |
 |---|---|
 | `desktoptasks.py` | The entry point. Every mode is a flag on this one file. Also redirects `stdout`/`stderr` to a log when there's no console. See [No console](#no-console-so-output-goes-to-a-file). |
-| `google_tasks.py` | The fetcher. Refresh token → access token, list the task lists, list open tasks in each, write `tasks.json`. One pass and exit, no loop. The only module that talks to Google's API. Stdlib only. |
-| `google_tasks_setup.py` | The consent flow. Starts a loopback listener, opens Google's own consent page, catches the redirect, saves the refresh token. Run again to reconnect. Stdlib only. |
+| `google_tasks.py` | The fetcher. Refresh token → access token, list the task lists, list open tasks in each, write `tasks.json`. One pass and exit, no loop. The only module that talks to Google's API. Also owns the accounts model: which account is active, and the per-account task shelves. Stdlib only. |
+| `google_tasks_setup.py` | The consent flow. Starts a loopback listener, opens Google's own consent page, catches the redirect, refuses a sign-in that did not grant the Tasks scope, and files the refresh token under the account's email address. Run again to reconnect, or with `add_account` to add a second one. Stdlib only. |
 | `oauth_client.py` | The OAuth client a release signs in with. **Gitignored**, bundled into the exe at build time. See [The OAuth client](#the-oauth-client-shipped-with-the-app-never-committed). |
 | `oauth_client.example.py` | The tracked template of the above, with `None` values and instructions for making your own client. |
 | `widget.py` | Launches the pinned window: hosts the server, opens a frameless WebView2 window at the configured position, hides it from the taskbar, pins it behind the desktop icons so it survives Win+D, clips it to rounded corners, runs the interval fetch, runs the tray icon, and owns the Reconnect flow. |
 | `serve.py` | Minimal local web server so the page can read its JSON. Serves only an explicit allowlist. `config.json`, which holds the refresh token, is never reachable over HTTP. Loopback-bound and behind `net_guard`. Also synthesises `/settings.json` per request. Normally a thread inside `widget.py`; still runnable alone for debugging, where `POST /restart` and `/quit` correctly report there's no widget here to act on. |
 | `dashboard.html` / `dashboard.js` | The widget's UI and all its behaviour. Rendering, nesting, date handling, auto-refresh, auto-resize. |
-| `settings.html` / `settings.js` | The **Modify** page, opened from the tray. Three tabs: Accounts, Layout, Appearance. The only way to change settings without editing JSON, and the only place Reconnect Google now lives. See [The settings page](#the-settings-page). |
+| `settings.html` / `settings.js` | The **Modify** page, opened from the tray. Three tabs: Account, Layout, Appearance, laid out as a two-column grid of cards. The only way to change settings without editing JSON, and the only place Reconnect Google now lives. See [The settings page](#the-settings-page). |
 | `paths.py` | Where every file lives. Splits read-only bundled assets from writable per-user data, which a packaged build requires and a source checkout collapses back into one folder. |
-| `platform_win.py` | Every Windows-specific call in one file. Rounded-corner clipping, taskbar hiding, desktop pinning, the accent-colour registry read, the single-instance mutex, shortcuts, and the dialog / Add-Remove-entry / deferred-self-delete pieces an installer would need. Isolated so another platform means writing a sibling, not unpicking this one. |
+| `platform_win.py` | Every Windows-specific call in one file. Rounded-corner clipping, taskbar hiding, desktop pinning, the accent-colour registry read, the single-instance mutex, the shortcut writing, and the dialogs, Add/Remove entry and deferred self-delete that setup and uninstall are built on. Isolated so another platform means writing a sibling, not unpicking this one. |
 | `net_guard.py` | The one definition of "did this request really come from this machine?". Loopback binding keeps the server off the network; this is what keeps the local browser from being used as a way in. See [Who can reach this server](#who-can-reach-this-server). |
 | `logo_cache.py` | Caches the derived copies of `logo.png`. The tray PNG and a shortcut `.ico`. In the cache folder, rebuilt only when the logo's *contents* change. |
-| `build.py` / `DesktopTasks.spec` / `make_icon.py` | Produce `dist/DesktopTasks.exe`. See [Building the executable](#building-the-executable). |
+| `shortcuts.py` | The three Windows shortcuts: Startup, Start menu, Desktop. Decides what a shortcut points at (the installed exe when frozen, `pythonw.exe desktoptasks.py` from source) and reads or writes them. `platform_win.py` does the actual `.lnk` writing. Used by both the settings page and setup. |
+| `setup_app.py` | Installs the app: copies the binary into `%LOCALAPPDATA%`, seeds the config files, writes the shortcuts, registers the uninstaller, launches the widget. One native dialog, no wizard. See [What setup does](#what-setup-does). |
+| `uninstall.py` | Removes all of it, with a tick box that keeps your settings and your signed-in account. See [What uninstall removes](#what-uninstall-removes). |
+| `build.py` / `DesktopTasks.spec` / `make_icon.py` / `version_info.txt` | Produce `dist/DesktopTasks.exe` and the setup-named copy beside it. See [Building the executable](#building-the-executable). |
 | `logo.png` | The single source of truth for the app's mark: the exe icon and the tray icon both derive from it. At the repo root rather than in `source/`, because it's the project's own identity rather than part of the dashboard. |
 | `config.json` | Your refresh token and all your settings. **Gitignored**: never committed. |
 | `config.example.json` | A credential-free template of the above, for sharing this tool with someone else: they copy it and fill in their own values rather than yours. |
-| `tasks.json` | The fetcher's output, rewritten every run. Gitignored, not data you'd miss. |
+| `appearance.py` | Owns `appearance.json`: which keys live there, the one-time migration out of `config.json`, the palette and metric defaults, and the merge that lets every other module go on reading one config dict. |
+| `appearance.json` | How the widget looks. **Gitignored** (it's yours), but it holds no secrets, so it is the file to open when you want to change something by hand. |
+| `appearance.example.json` | The tracked template of the above, with every key and every default spelled out, including the two blocks the settings page never shows. |
+| `tasks.json` | The fetcher's output, rewritten every run, and stamped with the account it came from. The single live file the widget and the page read. Gitignored, not data you'd miss. |
+| `cache/tasks-<hash>.json` | One shelf per account, so switching accounts shows that account's last-fetched tasks instead of a blank widget. Written beside `tasks.json`, keyed by a hash of the account id. |
 | `desktoptasks.log` | Written whenever there's no console to print to. Gitignored. |
 
 Deliberately absent, where DesktopCards has one:
 
 | Not here | Why |
 |---|---|
-| `appearance.json` | Not adopted. The handful of look-and-feel values live in `config.json`'s `window` block instead, and reach the page through `/settings.json`. |
-| `setup_app.py` | DesktopCards runs its settings page as a second Flask app. Here the same page is two static files served by the widget's own server, so there is no second process, no second port and no second framework. |
-| `uninstall.py`, an installer | Not built yet. `platform_win.py` already has every OS piece it would need. |
+| A setup *page* | DesktopCards runs its setup and settings as a second Flask app on its own port. Here the settings page is two static files served by the widget's own server, and setup is one native dialog, so there is no second process, no second port and no second framework. `setup_app.py` exists but shares nothing with its DesktopCards namesake beyond the name. |
 | `accent_color.py` | Folded into `widget.resolve_accent`, which reads the accent at launch and falls back if the registry read fails. |
 
 ---
@@ -130,9 +176,17 @@ Google account you linked.
 |---|---|---|
 | Code and the page | `source/` | inside the exe, unpacked per launch |
 | `logo.png` | repo root | bundled flat in the exe |
-| `config.json`, `tasks.json`, the log | `config/` | `%LOCALAPPDATA%\DesktopTasks\` |
-| `config.example.json` | `config/` | bundled in the exe |
+| `config.json`, `appearance.json`, `tasks.json`, the log | `config/` | `%LOCALAPPDATA%\DesktopTasks\` |
+| Per-account task shelves, the logo cache | `config/cache/` | `%LOCALAPPDATA%\DesktopTasks\cache\` |
+| `config.example.json`, `appearance.example.json` | `config/` | bundled in the exe |
+| The installed app and `Uninstall.exe` | n/a | `%LOCALAPPDATA%\DesktopTasks\` |
+| Shortcuts | n/a, unless you tick them | `%APPDATA%\...\Start Menu\`, `...\Startup\`, your Desktop |
 | Build output | `dist/`, `build/` | n/a |
+
+The installed exes sit in `DATA_DIR` beside the data, as
+`paths.INSTALLED_EXE_PATH` and `paths.UNINSTALL_EXE_PATH`. One per-user
+folder rather than Program Files, which is what keeps installing and
+uninstalling free of an administrator prompt.
 
 `paths.py` is the only module that knows the difference. Nothing else
 derives a path from `__file__`. Under PyInstaller that resolves inside
@@ -159,41 +213,137 @@ The four constants that matter:
 
 ---
 
-## Configuration (`config.json`)
+## Configuration (`config.json` and `appearance.json`)
 
-One file, holding credentials and settings together. Every key has a sane
-default, so a missing file still runs.
+Two files, split by what they are rather than by what reads them.
+`config.json` is the account: the Google refresh token, the OAuth client,
+which lists are fetched, how often, and where the window sits.
+`appearance.json` is everything about how the widget looks. Every key in
+both has a sane default, so either file can be missing and the widget
+still runs.
+
+The split is DesktopCards', and it buys one concrete thing: a settings
+file you can open, read top to bottom and hand to someone without ever
+showing them a credential. That is what makes the two file-only blocks
+below -- `colors` and `metrics` -- reasonable to have at all.
+
+**Nothing to migrate.** The first time `appearance.json` is missing, the
+look-and-feel keys are lifted out of `config.json`, written to the new
+file and removed from the old one. An older `config.json` keeps working,
+and neither file ends up with two copies of the same setting.
+
+### `config.json`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `refresh_token` | `null` | Written for you when you sign in. The only lasting credential. Keep it to yourself. It grants read access to your tasks. |
-| `tasklist_ids` | `[]` | Which lists to show, as ids. Empty means every list. Narrowing it is how you keep one shopping list off a desktop that's mostly for work. Left alone on a reconnect, so a narrowed selection survives the weekly re-auth. |
-| `tasklist_order` | `[]` | The order lists are drawn in, as ids. Any list not named here keeps its position behind the ones that are, so a list created later appears rather than vanishing. Set by dragging on the Layout tab. |
-| `columns` | `1` | How many columns to deal the lists across. The window widens to match. |
-| `max_tasks` | `0` | Cap on rows drawn, counted across every list and every nesting level. `0` draws everything. See the height ceiling below. |
-| `scale` | `1.0` | Zoom on the whole page. The window follows. |
-| `spacing` | `0` | Extra padding around the edges, in pixels. Widens and heightens the window. |
-| `opacity` | `1.0` | How solid the widget is, with `translucent_background` on. |
-| `translucent_background` | `false` | Lets the wallpaper through. Needs a **Restart**, because the OS window itself has to be created transparent. |
+| `accounts` | `[]` | One entry per signed-in Google account: `id`, `email`, `refresh_token`, `tasklist_ids`, `tasklist_order`. Written for you when you sign in. Keep it to yourself: each token grants read access to that account's tasks. |
+| `active_account` | `null` | The id of the account being fetched. The one and only account whose tasks are pulled. See [Several Google accounts](#several-google-accounts). |
+| `refresh_token` | `null` | Legacy, and still how the rest of the code reads the token: the active account's keys are lifted to the top level on load and folded back on save. A pre-accounts config is migrated on the next save; nobody is signed out. |
+| `tasklist_ids` | `[]` | Which lists get a card of their own, as ids. Empty means every list. Tasks are fetched for every list regardless, because the [personalised lists](#personalised-lists) read across all of them. Stored per account, and left alone on a reconnect, so a narrowed selection survives the weekly re-auth. |
+| `tasklist_order` | `[]` | The order lists are drawn in, as ids. Any list not named here keeps its position behind the ones that are, so a list created later appears rather than vanishing. Per account. Set by dragging on the Layout tab. |
+| `personalised_lists` | `true` | The master switch for the built-in views. Off hides them all without forgetting which were ticked. |
+| `personalised_ids` | `["due_today"]` | Which views are drawn, as bare ids: `due_today`, `overdue`, `due_week`, `due_order`, `no_due`. Empty means none -- there is no "empty means all" shorthand here, unlike `tasklist_ids`. Global, not per account. |
 | `port` | `5100` | Local port `serve.py` binds. |
 | `fetch_interval_minutes` | `15` | How often to re-fetch. Read at launch by the widget's own timer, so a change applies on the next **Restart**: there's no schedule registered with Windows to re-apply. |
 | `show_completed` | `false` | Include completed tasks. Applied server-side by the API, not filtered here, which keeps a list with years of history from costing several pages to read. |
-| `show_notes` | `true` | Show notes under the title. |
-| `group_by_list` | `true` | One card per list, or everything merged into one. |
 | `client_id`, `client_secret` | `null` | Override the bundled OAuth client with your own. Explicit values always win. |
 | `window.x`, `window.y` | `100` | Where the widget sits. |
-| `window.corner_radius` | `16` | Rounded-corner clip radius, in pixels. |
-| `window.survive_show_desktop` | `true` | Pin it behind the desktop icons. `false` makes it an ordinary floating window. |
-| `window.dark_theme` | `true` | Dark or light palette. |
-| `window.accent` | `null` | Accent colour. `null` means read your Windows accent. |
 
-Most changes land on the next **Reload**, because `/settings.json` is
-rebuilt per request. Saving from the settings page triggers that reload for
-you (see below). The window ones (`x`, `y`, `survive_show_desktop`,
-`corner_radius`, `translucent_background`) need a **Restart**, since
-they're only read when the window is created.
+### `appearance.json`
 
-### Why one file, split by ownership
+Flat, the way DesktopCards writes it: the four keys that used to sit in
+`config.json`'s `window` block are at the top level here, and the widget
+folds them back into `window` when it reads them.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `dark_theme` | `true` | Dark or light palette. |
+| `accent` | `null` | Accent colour. `null` means read your Windows accent. |
+| `corner_radius` | `16` | Rounded-corner clip radius, in pixels. |
+| `survive_show_desktop` | `true` | Pin it behind the desktop icons. `false` makes it an ordinary floating window. |
+| `columns` | `1` | How many columns to deal the lists across. The window widens to match. |
+| `column_width` | `325` | One column's design width, in real pixels. `scale` does not change it: the page divides the scale back out, so larger text means fewer characters per line rather than a wider window. |
+| `max_height` | `0` | A hard ceiling on the window height, in real pixels, `scale` included. `0` grows to fit every task. Unlike `max_tasks` this clips rather than reflowing, so a half-visible task at the bottom edge is the signal that there is more below. |
+| `max_tasks` | `0` | Cap on rows drawn, counted across every list and every nesting level. `0` draws everything. |
+| `scale` | `1.0` | Zoom on the whole page. The window follows. |
+| `spacing` | `0` | Extra padding around the edges, in real pixels, and like `column_width` unaffected by `scale`. Widens and heightens the window. |
+| `custom_spacing` | `false` | Use `spacing_sides` instead of the single number. |
+| `spacing_sides` | all `0` | `{left, top, right, bottom}`, in pixels, used only while `custom_spacing` is on. A widget in a screen corner wants room on two sides and none on the others. |
+| `opacity` | `1.0` | How solid the widget is, with `translucent_background` on. |
+| `translucent_background` | `false` | Lets the wallpaper through. Needs a **Restart**, because the OS window itself has to be created transparent. |
+| `show_notes` | `true` | Show notes under the title. |
+| `group_by_list` | `true` | One card per list, or everything merged into one. |
+| `colors` | the palette below | Per-theme colour overrides. **No UI.** |
+| `metrics` | the numbers below | Spacing and text sizing. **No UI.** |
+
+### The two blocks with no UI
+
+`colors` and `metrics` are hand-edited only. There is no control for
+either on the settings page, and that is enforced rather than merely
+unimplemented: both ride on `/settings.json`, which only the widget page
+fetches, and both are left out of `/api/state`, which is what the settings
+page reads. The page is never told they exist, so it cannot show them and
+cannot overwrite them on save.
+
+Edit either and **Reload** from the tray. The file is re-read per request,
+so there is no sync step.
+
+**`colors`** overrides the palette token by token, per theme, under
+`"light"` and `"dark"`. Anything left out keeps its default, and an
+unrecognised token name is ignored:
+
+| Token | Light | Dark | Where you see it |
+|---|---|---|---|
+| `surface-0` | `#f3f4f6` | `#1d2128` | The page behind the cards |
+| `surface-1` | `#ffffff` | `#292e37` | A list card |
+| `surface-2` | `#e5e7eb` | `#3e4651` | The task ring, dividers |
+| `text-primary` | `#1f2937` | `#f2f4f7` | Task titles |
+| `text-secondary` | `#374151` | `#d5dbe3` | Body text on a card |
+| `text-muted` | `#6b7280` | `#a2abb8` | List titles, notes |
+| `text-faint` | `#9ca3af` | `#7a8391` | The "Tasks" heading, the clock, due dates |
+| `overdue` | `#dc2626` | `#f87171` | A past due date |
+| `today` | `#b45309` | `#fbbf24` | A due date of today |
+| `error` | `#ef4444` | `#fa8585` | The reconnect notice |
+| `error-surface` | `#fef2f2` | `#43282d` | That notice's background |
+
+Each override is written to the *raw* tier of its token, the same tier
+`accent` uses, so a custom colour still goes through the translucency
+layer instead of sitting opaque on top of it. Only the theme in use is
+written: setting both would leave the losing theme's values live in the
+element's inline style, where the stylesheet could never win them back on
+a theme switch.
+
+`accent` is deliberately not in this block. It already has a home of its
+own, one table up, and two places to look is one too many when a colour
+comes out wrong.
+
+**`metrics`** is spacing and text sizing. Lengths are in real desktop
+pixels and are divided back out of `scale`, like `column_width`; the two
+scales are plain multipliers.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `font_scale` | `1.0` | Every piece of text in the widget. Distinct from `scale`, which is a zoom: that one grows the cards, the columns and the spacing along with the text, this one grows only the text, inside a layout that stays exactly where it was. |
+| `task_font_scale` | `0.95` | The task title and its note, on top of `font_scale`. The two move together, because they are one block of text to read. |
+| `task_indent` | `24` | How far a task sits from the card's left wall. It is the card's own left padding, so the list title steps in with the tasks rather than being left behind. |
+| `task_gap` | `6` | Space between one task and the next, wall to wall. Split evenly above and below each row. |
+| `task_top` | `7` | Space between the list title (or the card's top edge) and the first task. |
+
+Both blocks' defaults live in `appearance.py` and are repeated in
+`dashboard.html`, so the page draws correctly in the moment before
+`/settings.json` arrives. The two have to be kept in step.
+
+Most changes in either file land on the next **Reload**, because
+`/settings.json` is rebuilt per request from both. Saving from the
+settings page triggers that reload for you (see below). The window ones
+(`window.x`, `window.y`, `survive_show_desktop`, `corner_radius`,
+`translucent_background`) need a **Restart**, since they're only read when
+the window is created, and `fetch_interval_minutes` does too, since the
+timer reads it at launch. The settings page marks each
+of those as applying after a Restart, and carries a **Restart widget**
+button next to Save.
+
+### Why two files, split by ownership
 
 An earlier revision split `config/` per service. `google.json` for
 credentials plus `settings.json` for the rest. On the reasoning that a
@@ -205,8 +355,14 @@ to and became *who owns it*:
 - The **client credentials belong to the app**, so they live in source
   (`oauth_client.py`) and ride along inside the frozen binary. No copy
   step, and no way for a user to delete them by editing JSON.
-- The **refresh token and the settings belong to the user**, so they live
-  in one gitignored `config.json`, matching DesktopCards.
+- The **refresh token belongs to the user**, so it lives in a gitignored
+  `config.json`, matching DesktopCards.
+- **How the widget looks belongs to the user too, but is not a secret**,
+  so it lives in a second gitignored file, `appearance.json` -- again
+  matching DesktopCards. Keeping the two apart is what lets a colour or a
+  spacing be edited by hand, and shown to someone, without the file also
+  containing a token that grants read access to an inbox's worth of
+  tasks.
 
 `load_config()` fills the shipped client in wherever `config.json` leaves
 `client_id` null, and `save_config()` strips it back out before writing.
@@ -266,8 +422,11 @@ Not reproducible from the code, so it's recorded here.
   API library for "tasks" surfaces **Cloud Tasks API** first, which is an
   unrelated job-queue product. Wrong one.
 - **OAuth consent screen** configured, user type **External**.
-- **Scope** `https://www.googleapis.com/auth/tasks.readonly`. Google labels
-  this *sensitive*, which is expected and fine.
+- **Scopes** `https://www.googleapis.com/auth/tasks.readonly`, plus
+  `openid email`. Google labels the first *sensitive*, which is expected
+  and fine. The second is what lets the account switcher label an account
+  with its address instead of "Google account"; the email is read, unverified,
+  out of the `id_token` the token endpoint returns, and is never sent anywhere.
 - **Publishing status: Testing.** See below.
 - **Test users**: the owner's own Gmail.
 - **OAuth client type: Desktop app.** Required, not a preference. It's the
@@ -283,7 +442,17 @@ widget stays read-only.
 `access_type=offline` **and** `prompt=consent` are both load-bearing in the
 auth URL. Without the second, a re-run returns an access token only, and
 reconnecting silently fails to produce the refresh token the whole flow
-exists to get.
+exists to get. `select_account` is on the same `prompt`, so adding a second
+account does not silently re-consent as the one already signed in.
+
+**A consent box can be unticked.** Google's screen lists each scope with a
+checkbox, and clearing *See your tasks* still issues a perfectly valid
+token. Nothing fails until the first API call, which comes back as a bare
+`403` with no indication of why. So the granted scopes are checked against
+the `scope` field of the token response and a sign-in without
+`tasks.readonly` is refused before anything is saved, a `403` from the
+fetcher is reported as `NO_TASKS_SCOPE` rather than a generic failure, and
+the settings page says to leave the boxes alone before you go.
 
 ---
 
@@ -445,13 +614,42 @@ is stored:
 
 | Tab | Holds |
 |---|---|
-| **Accounts** | Whether Google is connected, **Reconnect Google**, which task lists to show, and the fetch interval. |
+| **Account** | Whether Google is connected, the account switcher, **Reconnect Google** / **Edit tasks** / **Remove account**, which task lists to show and which [personalised lists](#personalised-lists) to draw, and the fetch interval. |
 | **Layout** | Number of columns, maximum tasks shown, and the drag-to-reorder list order. |
-| **Appearance** | Scale, breathing room, corner radius, translucency and opacity, theme, accent, and the window position. |
+| **Appearance** | Theme, accent, translucency and opacity in one card, the dimensions (column width and max height), scale, breathing room, corner radius, the window position, and the Windows shortcuts. |
+
+Each tab is a two-column grid of cards, packed tallest-first so a short
+card does not leave a hole beside a long one, with the two cards that are
+really the tab's tail, **Order** and nothing else, pinned full width at
+the bottom. **Edit tasks** is a real link to `tasks.google.com` rather than
+a button that calls `window.open`, so middle-click opens it in a background
+tab like any other link; it is shown whenever an account is attached, since
+an expired token is still an account whose tasks you might want to go and
+edit.
 
 Position sits under Appearance rather than Layout on purpose. Layout is
 about how the lists are arranged *inside* the widget. Where the widget
 itself sits on the screen is a property of the window.
+
+### The Windows shortcuts card
+
+Three switches: start with Windows, Start menu, desktop. They are not
+settings. They are `.lnk` files, so they have their own route,
+`POST /api/shortcuts`, rather than keys in `WRITABLE`, and nothing about
+them is stored in `config.json`. The truth is the file on disk: deleting
+the shortcut out of the Startup folder *is* turning autostart off, and a
+remembered flag would only ever disagree with it.
+
+The ticks are pending until **Save**, like everything else on the page,
+and Save posts them only when a tick actually moved. Writing three
+shortcuts is not work a save that changed a colour should be doing.
+**Redo shortcuts** writes all three immediately, which is the one thing
+the switches cannot express: a shortcut that exists but points somewhere
+stale is already ticked, so Save sees nothing to do.
+
+The card also draws the destination folder under each label, and disables
+itself if `shortcuts.available()` is false. `serve.build_state` sends the
+whole thing inside `/api/state` so the page still reads in one request.
 
 ### Writes go through an allowlist too
 
@@ -484,10 +682,13 @@ Either one alone reads to the user as the setting not working.
 
 `tasks.json` carries **every** list the account has, each with a
 `selected` flag, and only the selected ones have their tasks fetched. An
-unselected list costs one line in the file and no API call.
+unselected list costs one line in the file and no API call. The Layout
+tab's **Order** card lists them too, faded and marked *Not shown*, so an
+unticked list keeps its place in the order for when you tick it back
+rather than silently falling to the end.
 
 Writing only the chosen lists was the obvious thing and it was a dead end.
-The Accounts tab draws its checkboxes from `tasks.json`, so narrowing the
+The Account tab draws its checkboxes from `tasks.json`, so narrowing the
 selection deleted the other lists from the very page that had just
 unticked them, with no way left to tick them again. `dashboard.js` filters
 `selected === false` out before rendering.
@@ -511,6 +712,167 @@ minutes would just time out somewhere. More to the point, a sign-in
 started in a browser tab should answer in that tab. The native message box
 is still there for the same flow started from somewhere other than the
 page, which is what `connect_google`'s `notify` argument selects.
+
+---
+
+## Personalised lists
+
+Five views the widget assembles itself, out of the tasks it has already
+fetched: **Due today** (overdue and today), **Overdue**, **Due this
+week** (anything due in the next six days, overdue included), **Due in
+order** (everything with a date, soonest first) and **No due date**.
+They are cards like any other list, and they take their place in the
+Layout **Order** alongside the real ones.
+
+They are not Google lists, and they are not Google's **Starred**. The
+Tasks API has no starred field at all -- the Task resource is `id`,
+`title`, `notes`, `status`, `due`, `completed`, `parent`, `position`,
+`links[]`, `webViewLink` and `assignmentInfo`, and starring exists only
+in Google's own clients. These views are what can be built from what the
+API does return.
+
+**Built from every list, ticked or not.** A view gathers across the
+whole account, deduplicated by task id -- ids are unique account-wide,
+so a task reached twice is still one task. *Due today* means everything
+due today; a view that quietly skipped the lists you keep off the
+desktop would be a wrong answer rather than a narrower one. Unticking a
+list still keeps its own card off the widget, which is all that tick
+was ever about.
+
+This is why the fetcher pulls tasks for every list rather than only the
+chosen ones (`_main` in `google_tasks.py`). It costs one API call per
+unchosen list per fetch, against a free API on a timer measured in
+minutes. It also means the Account tab can print a real count beside a
+list you have not ticked.
+
+**A task can appear twice**, once in its own list's card and once in a
+view. That is deliberate: a view is a lens over the tasks, not a folder
+they are moved into, and a task vanishing from the list you know it
+lives in would be the more surprising of the two.
+
+**Flattened, and in their own order.** Subtasks are drawn at the top
+level inside a view rather than nested, because a view's heading is a
+filter and nesting under it would imply a structure that isn't there.
+The order is carried in a synthetic `position` on each copied task,
+because `renderList` sorts siblings by `position` -- writing them out in
+due order and leaving Google's position in place would just have them
+sorted back.
+
+**A name collision is numbered.** A list you have actually called
+*Overdue* keeps its name, and the built-in view becomes *Overdue (1)*,
+the way a file manager numbers a duplicate. Two identically headed cards
+is the one way these views can genuinely mislead.
+
+**Defined twice, on purpose.** `PERSONALISED` exists in `dashboard.js`,
+which builds the cards, and again in `serve.py`, which needs the names
+and the counts for the settings page. The widget reads `tasks.json` and
+`settings.json` straight off disk and never calls `/api/state`, so there
+is no one place both could read. The ids and the rules have to be kept
+in step by hand; each table says so.
+
+**Two settings, not one.** `personalised_lists` is the master switch and
+`personalised_ids` is which views are on. Turning the switch off has to
+be different from unticking all five, or switching it back on would come
+back empty. The settings page keeps the rows on screen while the switch
+is off, faded and inert, so there is something visible to switch back
+on, and saving while off still writes whatever was ticked.
+
+**The ids are prefixed where they mix.** A view is `due_today` in
+`personalised_ids`, and `virtual:due_today` anywhere it sits beside a
+real Google list id -- in `tasklist_order`, and in the Order card's rows.
+`tasklist_ids` never holds one: that list is what the fetcher asks
+Google for, and a made-up id there is a request for a list that does not
+exist.
+
+## Several Google accounts
+
+`config.json` holds an `accounts` list and an `active_account` id. Exactly
+one account is fetched: the interval timer, the token refresh and the
+settings page were all written against a single `refresh_token` and a
+single `tasklist_ids`, and none of them had to change.
+
+### The lift and the fold
+
+`load_config()` ends by copying the active account's `refresh_token`,
+`tasklist_ids` and `tasklist_order` up to the top level, and `save_config()`
+folds them back onto that entry and removes the top-level copies before
+writing. `serve.py` mirrors both halves, because it writes the file too.
+
+So every existing reader still reads one account's worth of config, and
+switching accounts is only a question of which entry gets lifted. A config
+from before accounts existed is migrated in memory on load, where its bare
+token becomes an entry with the id `legacy`, and reaches disk on the next
+save.
+Nobody is signed out by upgrading.
+
+One ordering trap, found by a test rather than by reading: the fold has to
+happen **before** `active_account` is changed. The other way round writes
+the departing account's task selection onto the account you just switched
+to.
+
+### A shelf per account
+
+Switching without fetching would otherwise show an empty widget, so each
+account keeps its last fetch in `cache/tasks-<sha1(id)[:12]>.json`.
+A switch stashes the current `tasks.json` onto the outgoing account's shelf
+and restores the incoming one's. `tasks.json` stays the one live file the
+widget and the page read.
+
+Every one of those files carries an `"account"` stamp, and `stash_tasks`,
+`restore_tasks` and `build_state` all refuse a file stamped for a different
+account. The leak this guards against is one account's tasks drawn under
+another's name, which is the whole reason the stamp exists. It was observed
+before it did.
+
+### Switching is a form value
+
+Picking an account in the dropdown changes nothing yet. It is dirty state
+like any other control, applied by **Save**, which posts the switch first
+and the rest of the settings second. The checkboxes on screen belong to the
+account you picked, so that account has to be active before the selection
+is folded onto it.
+
+Because the page previews the pick immediately (below), choosing a
+different account discards unsaved ticks on the previous account's task
+lists. That is no worse than never having saved them, but it happens
+without a prompt.
+
+### Previewing an account
+
+`GET /api/state?account=<id>` describes that account instead of the active
+one, and writes nothing. That means its shelf for the lists, and its own
+entry for the selection and the order. The dropdown's `onchange` redraws only the
+account-tied cards from it, so the settings page follows your pick while
+the widget stays where it is until Save. An unknown id falls back to the
+active account, the per-account `active` flags still report what is really
+running, and a reply whose `viewing` is no longer the current pick is
+dropped, so two fast switches cannot land out of order.
+
+### Reload recommended
+
+Switching does not fetch, so what you are looking at is whatever was last
+pulled for that account. The page says so in a flashing notice, with the
+age of that data in words, as *Last fetched 3 hours ago*, because "Reload
+recommended" on its own cannot tell you whether it matters. The notice
+carries the fix: a **Reload now** button, which reads **Switch and reload**
+while a switch is pending and then does both. It is the one path where an
+account change takes effect without Save, which is why the label says so.
+
+### Adding and removing
+
+**Add another account...** in the dropdown runs the same consent flow with
+an explicit `add` flag. The flag is load-bearing: without it the new token
+was matched against, and overwrote, the entry of the account that happened
+to be active, which signed the user out of the account they meant to keep.
+Accounts are matched by email address; an entry with no email is only
+adopted when this is a reconnect rather than an add, and two entries that
+turn out to be the same address are merged, keeping the non-empty task
+selection.
+
+**Remove account** confirms, drops the entry and deletes its shelf. If it
+was the active one, the survivor's tasks are restored in its place; if
+there is no survivor, `active_account` becomes `null` and the page goes
+back to saying Not connected.
 
 ---
 
@@ -808,19 +1170,21 @@ pip install pyinstaller
 python source/build.py
 ```
 
-Produces `dist/DesktopTasks.exe`, about 33 MB, carrying Python and every
-dependency, so it runs on a machine with no Python installed. Unsigned, so
-the first run trips SmartScreen (**More info → Run anyway**).
+Produces `dist/DesktopTasks.exe`, about 31 MB, carrying Python and every
+dependency, so it runs on a machine with no Python installed, plus
+`dist/DesktopTasks-Setup.exe` beside it. Unsigned, so the first run trips
+SmartScreen (**More info → Run anyway**).
 
-`build.py` runs a preflight, regenerates the icon, then calls PyInstaller
-against `DesktopTasks.spec` from the repo root, so `dist/` and `build/`
-land there rather than inside `source/`.
+`build.py` runs a preflight, regenerates the icon, calls PyInstaller
+against `DesktopTasks.spec` from the repo root so `dist/` and `build/`
+land there rather than inside `source/`, then writes the setup-named copy.
 
-> **Status: the exe builds, but has never been launched.** The frozen
-> runtime path is therefore unverified. `paths.FROZEN`, the
-> `%LOCALAPPDATA%` data dir, `EXAMPLES_DIR` resolving to the bundle, and
-> above all whether pywebview loads its WebView2 backend under onefile.
-> Launching it is the first thing to do before trusting a release.
+> **Status.** `DesktopTasks.exe --fetch` has been run frozen: the bundle
+> unpacks, `paths.FROZEN` resolves, and it reaches the fetch and reports
+> no connected account from the `%LOCALAPPDATA%` data dir. Still
+> unverified: the widget window itself under onefile, which is to say
+> whether pywebview loads its WebView2 backend, and the setup and
+> uninstall dialogs end to end.
 
 ### The preflight: the one way this build can ship broken
 
@@ -840,14 +1204,112 @@ file that's executing and it's harmless when nothing holds it. Otherwise
 the build dies as a bare `PermissionError` from deep inside someone else's
 code.
 
-### One exe, not two
+### Three names, one binary
 
-DesktopCards ships the same binary twice under different names, because its
-first run is a Flask setup page and the filename selects the mode. There's
-nothing to select here: a first launch brings up the widget, which reports
-it has no tasks, and connecting happens from the tray. So the name carries
-no meaning, `desktoptasks.py` has no `looks_like_setup_build()` equivalent,
-and one output is enough.
+`build.py` writes `dist/DesktopTasks.exe` and then copies it to
+`dist/DesktopTasks-Setup.exe`. Setup installs a third copy as
+`Uninstall.exe`. All three are the same bytes, and the **filename** is
+what picks the mode:
+
+| Name | Mode | Also reachable as |
+|---|---|---|
+| `DesktopTasks.exe` | The widget | |
+| `DesktopTasks-Setup.exe` | Setup | `DesktopTasks.exe --setup` |
+| `Uninstall.exe` | Uninstall | `DesktopTasks.exe --uninstall` |
+
+`desktoptasks.looks_like_setup_build()` is the test. `"uninstall"`
+contains `"install"`, so the uninstall names are checked **first**, which
+is why that check is a function rather than one `in` test.
+
+A copy rather than a second build: there is nothing extra to compile and
+nothing that can fall out of step between the app and the thing that
+installs it. It is also why setup never writes a new `.exe` of its own.
+A program that generates an executable is doing what droppers do, and
+antivirus treats it accordingly.
+
+### What to ship
+
+**`DesktopTasks-Setup.exe`, and nothing else.** It is the whole app:
+running it writes the other two names itself. `dist/DesktopTasks.exe` is
+an output of an install, not a download, and publishing it as well would
+only be a second copy of the same bytes that lands people in the widget
+without installing it. One file also means one SmartScreen warning and no
+zip for anyone to half-extract.
+
+Someone who wants to run it without installing can rename it to anything
+without `setup`, `install` or `uninstall` in the name. Nothing in the UI
+says so, so it belongs in the release notes rather than being discovered.
+
+**The release must keep "Setup" in the filename.** A release asset renamed
+to `DesktopTasks-0.1.exe` no longer matches `SETUP_NAMES`, so
+double-clicking it runs the widget uninstalled instead of installing
+anything. `DesktopTasks-Setup-0.1.exe` is fine. This is the one real cost
+of letting the filename select the mode, and the alternative, a download
+that installs only when passed `--setup`, makes a double-click do nothing
+useful, which is worse for the person who just downloaded it.
+
+### What setup does
+
+`setup_app.py`, in order:
+
+1. Asks a running widget to quit, because Windows holds a running exe
+   open and the binary cannot be replaced underneath it.
+2. Copies itself to `%LOCALAPPDATA%\DesktopTasks\DesktopTasks.exe`.
+3. Seeds `config.json` and `appearance.json` from the bundled examples,
+   but only the ones that are **missing**. Reinstalling must not reset
+   the look or overwrite the file holding the refresh token.
+4. Writes the shortcuts through `shortcuts.apply`. The Start-menu entry
+   is not a choice; Startup is the dialog's one tick box; the desktop one
+   is left alone here and lives on the settings page.
+5. Copies `Uninstall.exe` beside the app and registers it in HKCU, so the
+   app appears in **Settings → Apps** with a working Uninstall button.
+6. Launches the widget.
+
+It is one native dialog, not a wizard. DesktopCards needs five steps
+because nothing of its widget works until Plaid credentials are in and a
+bank is linked. The only thing to set up here is a Google sign-in, and the
+tray and the settings page already own that. So setup imports no
+pywebview, no Flask and no PIL, and the widget takes it from there.
+
+Nothing needs administrator: the app and its data are under
+`%LOCALAPPDATA%`, the shortcuts under `%APPDATA%`, the Add/Remove entry in
+`HKCU`.
+
+### What uninstall removes
+
+`uninstall.py` reverses exactly that list, in the order the pieces depend
+on each other: ask the widget to quit (`taskkill` only as a backstop, and
+never against itself), remove all three shortcuts, delete the HKCU entry,
+then the data.
+
+One tick box, ticked by default, keeps `config.json`, `appearance.json`
+and a user-supplied `logo.png`. The last fetch and the log go either way,
+because they are rebuilt within a minute of the next launch and a stale
+task list is the one thing nobody wants kept.
+
+The exes go last and from outside the process, through
+`platform_win.delete_after_exit`: Windows will not delete a running
+image, and when run as the installed `Uninstall.exe` this process **is**
+one of them. `DATA_DIR` goes the same way but through a plain `rmdir`,
+which refuses a folder that still holds the kept settings. That is the
+right answer rather than a problem to work around.
+
+Your tasks are never touched. They live in your Google account, the app
+only ever read them, and the refresh token is a local file, so removing it
+signs this computer out and nothing more.
+
+### The version resource
+
+`source/version_info.txt` is compiled into the exe by the spec's
+`version=`. Without it the binary has an icon but no name, and Windows
+reads `FileDescription` wherever it has to name a program it did not
+launch itself: Task Manager's **Startup** tab, **Settings → Apps →
+Startup**, the file's Details tab.
+
+The icon in those lists comes from the exe too. That is why a Startup
+entry for a **source** checkout stays generic: its shortcut points at
+`pythonw.exe`, and Windows describes the target, not the `.lnk`. Only an
+installed build can look right there.
 
 ### One entry point
 
@@ -1351,6 +1813,9 @@ once the project leaves Testing.
 - **Testing status.** The weekly reconnect, and the fact that nobody
   outside the test-user list can sign in. See
   [Testing status](#testing-status-and-the-two-things-it-costs).
+- **A switch discards unsaved ticks.** Picking a different account in the
+  dropdown redraws the task-list checkboxes from that account, so anything
+  ticked and not saved on the previous one is gone, with no prompt.
 - **The height ceiling.** With `max_tasks` at `0`, a long list runs off
   the bottom of the screen and the tasks past the edge are invisible. The
   OS will not grow the window further and there is no scrollbar. See
@@ -1382,13 +1847,15 @@ once the project leaves Testing.
   it was worked out first. `net_guard.py` and `platform_win.py` are
   essentially unchanged; `paths.py` and `serve.py` are adapted; `widget.py`
   and the page are rewritten around a different content model.
-- `DesktopCards/Docs/exe_problems.md` is a log of what went wrong the first
-  time that project was packaged, and is worth reading before touching the
-  build.
-- `DesktopCards/Docs/mac_port.md` covers what a macOS port would involve.
-  Three of `platform_win.py`'s five concerns are *simpler* there, where
-  windows are composited and a window level can be set directly instead of
-  reparenting onto a layer you first have to go find.
+- What went wrong the first time that project was packaged is carried over
+  into [Frozen-build hazards inherited from
+  DesktopCards](#frozen-build-hazards-inherited-from-desktopcards), which
+  is the thing to read before touching the build here.
+- [`Docs/mac_port.md`](https://github.com/AaryanPanigrahi/DesktopCards/blob/main/Docs/mac_port.md)
+  in that repo covers what a macOS port would involve. Three of
+  `platform_win.py`'s five concerns are *simpler* there, where windows are
+  composited and a window level can be set directly instead of reparenting
+  onto a layer you first have to go find.
 - Google's own documentation is the source for the installed-app credential
   model. That a desktop client's secret is not treated as confidential,
   and that PKCE is what secures the exchange.

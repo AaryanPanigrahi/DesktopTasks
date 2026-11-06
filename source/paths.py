@@ -34,9 +34,10 @@ The four constants that matter:
                 for things that genuinely live at the top: the generated
                 icon, dist/.
 
-Ported from DesktopCards/source/paths.py. Its appearance.json and
-Plaid-item paths are left out; appearance.json was deliberately not
-adopted here.
+Ported from DesktopCards/source/paths.py, including its appearance.json:
+everything about how the widget looks lives in that file, and config.json
+is left holding the account, the fetch and the window's position. Only the
+Plaid-item paths are left out, having no counterpart here.
 """
 
 import os
@@ -77,8 +78,14 @@ else:
 CONFIG_DIR = DATA_DIR
 
 CONFIG_EXAMPLE_PATH = os.path.join(EXAMPLES_DIR, "config.example.json")
+APPEARANCE_EXAMPLE_PATH = os.path.join(EXAMPLES_DIR, "appearance.example.json")
 
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
+
+# Look-and-feel, split out of config.json so that the file holding the
+# Google refresh token is not also the file you open to change a colour.
+# See appearance.py, which owns its shape and the one-time migration.
+APPEARANCE_PATH = os.path.join(DATA_DIR, "appearance.json")
 TASKS_PATH = os.path.join(DATA_DIR, "tasks.json")
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 
@@ -98,6 +105,18 @@ BUNDLED_LOGO_PATH = os.path.join(REPO_ROOT, "logo.png")
 # regenerated from logo.png on every build.
 ICON_PATH = os.path.join(REPO_ROOT, "DesktopTasks.ico")
 DIST_DIR = os.path.join(REPO_ROOT, "dist")
+
+# Where setup puts the app, and the uninstaller beside it. Both are
+# copies of the one binary: the filename is what selects widget mode over
+# setup or uninstall mode (see desktoptasks.py), so there is nothing to
+# build separately and nothing that can fall out of step.
+#
+# Under DATA_DIR, which frozen is %LOCALAPPDATA%\DesktopTasks. Per-user
+# and writable without a prompt, so installing never needs administrator.
+# From source these are only names: there is no single file to install,
+# and setup says so rather than copying anything.
+INSTALLED_EXE_PATH = os.path.join(DATA_DIR, "DesktopTasks.exe")
+UNINSTALL_EXE_PATH = os.path.join(DATA_DIR, "Uninstall.exe")
 
 # A logo dropped in DATA_DIR wins over the bundled one. From source these
 # are the same file, so editing logo.png in the repo just works. Frozen,

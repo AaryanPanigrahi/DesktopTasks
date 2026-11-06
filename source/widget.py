@@ -55,6 +55,7 @@ import webview
 from PIL import Image, ImageDraw
 import pystray
 
+import appearance
 import google_tasks
 import google_tasks_setup
 import logo_cache
@@ -81,9 +82,11 @@ PAGE = "dashboard.html"
 # corrects it (dashboard.js fitWindowToContent immediately resizes to the
 # real, scale-aware size -- keep WINDOW_WIDTH in sync with dashboard.html's
 # #shell { width: ... }, the actual design-width source of truth). The real
-# height always comes from the page measuring its own content, and is not
-# capped: a long task list is a reason for a taller window, not a reason to
-# hide the last task.
+# height comes from the page measuring its own content, bounded only by the
+# max_height setting if one is set.
+#
+# WINDOW_WIDTH is the default column width; the column_width setting
+# overrides it, and is read below for the opening frame.
 WINDOW_WIDTH = 325
 # Keep in step with dashboard.js's COL_GAP and dashboard.html's --col-gap.
 COLUMN_GAP = 10
@@ -157,16 +160,22 @@ def spawn_self(*args):
 def load_config():
     """config.json, or {} if it isn't there yet.
 
+    With appearance.json folded in, so scale, columns, the window's
+    corner radius and the rest read exactly as they did when they lived
+    in config.json. Read-only here -- the widget never writes either
+    file, so there is no risk of the merge being saved back.
+
     Unlike google_tasks.load_config this does not fill in the OAuth
     client, because nothing here needs it -- the window has to come up
     whether or not an account is connected, and the page renders the
     not-connected state out of tasks.json like any other."""
     try:
         with open(CONFIG_PATH, "r") as f:
-            return json.load(f)
+            config = json.load(f)
     except (OSError, ValueError) as e:
         print(f"[widget] config.json unreadable ({e}); using defaults")
-        return {}
+        config = {}
+    return appearance.merge_into(config)
 
 
 def window_settings(config):
@@ -298,7 +307,7 @@ CONNECT_TIMEOUT_SECONDS = 300
 _connect_lock = threading.Lock()
 
 
-def connect_google(window, notify=None):
+def connect_google(window, notify=None, add_account=False):
     """Runs the OAuth consent flow in-process.
 
     Reached from the settings page's Reconnect Google button, through
@@ -324,6 +333,14 @@ def connect_google(window, notify=None):
     every failure by sys.exit with a message, which is why SystemExit is
     caught as the ordinary path rather than as a bug.
 
+    add_account=True says this sign-in is meant to attach a SECOND
+    Google account rather than to renew the one already there. It only
+    matters for an account signed in before the switcher existed, which
+    has no email address recorded and so cannot be matched by one: a
+    reconnect should adopt that entry and keep its list selection, and
+    an add must leave it alone. Nothing else can tell those two apart --
+    both arrive here as the same consent flow.
+
     notify=True restores the old native message box. Nothing passes it
     today; it is kept for a caller that has no page to report into, such
     as a future tray item or a command line run."""
@@ -348,7 +365,8 @@ def connect_google(window, notify=None):
         # No argv: a release build signs in with the bundled client. A
         # clone has no oauth_client.py, and credentials() exits with
         # instructions, which lands in the message box below.
-        google_tasks_setup.main([], timeout=CONNECT_TIMEOUT_SECONDS)
+        google_tasks_setup.main([], timeout=CONNECT_TIMEOUT_SECONDS,
+                               add_account=add_account)
     except SystemExit as e:
         # e.code is the message string sys.exit was given -- cancelled,
         # timed out, no refresh token returned, no client configured.
@@ -607,16 +625,22 @@ def main():
     # does not flash at one column's width before the page corrects it.
     # The page still owns the real number; this is only the first frame.
     columns = max(1, min(6, int(config.get("columns", 1) or 1)))
-    opening_width = int(
-        (WINDOW_WIDTH * columns + COLUMN_GAP * (columns - 1))
-        * float(config.get("scale", 1.0) or 1.0)
-    )
+    col_width = max(160, min(900, int(config.get("column_width", WINDOW_WIDTH)
+                                      or WINDOW_WIDTH)))
+    # The column width is in real pixels whatever the scale is -- the page
+    # divides it out of the zoom -- so only the gap between columns grows
+    # with the scale.
+    scale = float(config.get("scale", 1.0) or 1.0)
+    opening_width = int(col_width * columns + COLUMN_GAP * (columns - 1) * scale)
 
     window = webview.create_window(
         WINDOW_TITLE,
         url=f"http://{LOOPBACK}:{port}/{PAGE}",
         width=opening_width,
-        height=INITIAL_HEIGHT,
+        # Same idea for the height: honour a cap on the first frame so a
+        # capped widget does not flash full-size before the page measures.
+        height=min(INITIAL_HEIGHT, int(config.get("max_height", 0) or 0)
+                   or INITIAL_HEIGHT),
         x=win.get("x", 100),
         y=win.get("y", 100),
         frameless=True,
@@ -653,7 +677,8 @@ def main():
     serve.quit_hook = lambda: quit_now(tray, window)
     # The settings page's Reconnect Google button. Same shape as the two
     # above: the page POSTs, this process does the work.
-    serve.connect_hook = lambda: connect_google(window)
+    serve.connect_hook = lambda add_account=False: connect_google(
+        window, add_account=add_account)
     # Lets /refresh re-render the page, so a save from the settings page
     # applies without a tray Reload.
     serve.reload_hook = lambda: window.evaluate_js("reloadAll()")

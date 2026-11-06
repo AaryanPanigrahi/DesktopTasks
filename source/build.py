@@ -15,6 +15,7 @@ sign into. See preflight().
 """
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -25,6 +26,12 @@ from paths import ASSET_DIR, DIST_DIR, REPO_ROOT
 # the checkout, because dist/ is the app rather than part of the source.
 SPEC = os.path.join(ASSET_DIR, "DesktopTasks.spec")
 EXE = os.path.join(DIST_DIR, "DesktopTasks.exe")
+
+# What a user downloads. The same binary under a second name, because the
+# name is what selects setup mode (see desktoptasks.looks_like_setup_build),
+# so there is nothing extra to build and nothing that can fall out of step
+# with the app it installs.
+SETUP_EXE = os.path.join(DIST_DIR, "DesktopTasks-Setup.exe")
 
 # Gitignored, and the one input whose absence PyInstaller cannot notice.
 OAUTH_CLIENT = os.path.join(ASSET_DIR, "oauth_client.py")
@@ -39,15 +46,19 @@ def locked_exe():
     actually wrong.
 
     Renaming is the test: Windows refuses it for a file that's executing,
-    and it's harmless when nothing holds it."""
-    if not os.path.exists(EXE):
-        return False
-    probe = EXE + ".locktest"
-    try:
-        os.rename(EXE, probe)
-        os.rename(probe, EXE)
-    except OSError:
-        return True
+    and it's harmless when nothing holds it.
+
+    Both names, because the setup copy is written from the widget one
+    and is just as likely to be the file someone left running."""
+    for path in (EXE, SETUP_EXE):
+        if not os.path.exists(path):
+            continue
+        probe = path + ".locktest"
+        try:
+            os.rename(path, probe)
+            os.rename(probe, path)
+        except OSError:
+            return True
     return False
 
 
@@ -117,14 +128,14 @@ def preflight():
 
 
 def main():
-    print("1/3  preflight")
+    print("1/4  preflight")
     preflight()
     print("     ok -- release OAuth client present, nothing holding the exe")
 
-    print("\n2/3  icon")
+    print("\n2/4  icon")
     make_icon.main()
 
-    print("\n3/3  PyInstaller")
+    print("\n3/4  PyInstaller")
     # Run from the repo root so PyInstaller's dist/ and build/ land there
     # rather than inside source/. The spec resolves its own inputs from
     # SPECPATH, so it doesn't care where it's invoked from.
@@ -140,6 +151,12 @@ def main():
     size_mb = os.path.getsize(EXE) / (1024 * 1024)
     print(f"\n{EXE}  ({size_mb:.1f} MB)")
 
+    # A copy rather than a second build: one binary, three names, and
+    # nothing that can be out of step between them.
+    print("\n4/4  setup copy")
+    shutil.copy2(EXE, SETUP_EXE)
+    print(f"{SETUP_EXE}  (same binary, the name selects setup mode)")
+
     print(
         "\nNote: unsigned, so the first run trips SmartScreen "
         "(More info -> Run anyway)."
@@ -148,6 +165,8 @@ def main():
         "Worth checking by hand, because PyInstaller cannot:\n"
         "  DesktopTasks.exe --fetch     the fetch path, frozen\n"
         "  DesktopTasks.exe             the widget, and Reconnect Google\n"
+        "  DesktopTasks-Setup.exe       the install, the shortcuts and the\n"
+        "                               Add/Remove entry\n"
         "A blank window means pywebview did not load its backend -- see\n"
         f"the log at %LOCALAPPDATA%{os.sep}DesktopTasks{os.sep}desktoptasks.log."
     )

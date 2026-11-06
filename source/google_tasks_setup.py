@@ -31,16 +31,139 @@ import urllib.parse
 import webbrowser
 
 from google_tasks import (
+    ACCOUNT_KEYS,
+    TASKS_SCOPE,
     CONFIG_DIR,
     LOOPBACK,
     SCOPE,
     TOKEN_URL,
+    accounts,
     load_config,
     post_form,
     save_config,
 )
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+
+
+def email_from_id_token(id_token):
+    """The address out of the id_token Google returns with the tokens.
+
+    Read, not verified. Verifying a JWT signature is what you do when the
+    token arrived from a client you do not trust; this one came straight
+    back from Google's token endpoint over TLS in a request we made, so
+    there is no third party in the path to lie about it. And nothing
+    security-shaped hangs off the answer -- it is the label on a dropdown
+    entry. A malformed token costs the label and nothing else."""
+    try:
+        payload = id_token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)      # JWTs drop base64 padding
+        return json.loads(base64.urlsafe_b64decode(payload)).get("email", "")
+    except Exception:
+        return ""
+
+
+def remember_account(cfg, email, refresh_token, adopt=True):
+    """Files this sign-in under the right account and makes it active.
+
+    Keyed by email, so signing in again as an account you already have is
+    a reconnect -- the new token replaces the old one and the list
+    selection it had is kept, which is the whole reason the weekly
+    re-auth does not reset anything. A different address is a new entry.
+
+    The no-email case is the migrated legacy account and any account
+    signed in before the scope bump: there is no key to match on, so it
+    updates the active account in place rather than growing a duplicate
+    every reconnect.
+
+    adopt=False turns that matching off for an account whose address is
+    not already recorded. It is what "Add another account" passes: with
+    it on, adding a second account to a pre-switcher config would find
+    the one emailless entry, decide it was the same account under a new
+    address, and overwrite the account you were trying to keep."""
+    accs = [dict(a) for a in accounts(cfg)]
+    match = None
+    if email:
+        match = next((a for a in accs if a.get("email") == email), None)
+        # An account signed in before the scope bump has no email yet.
+        # The first reconnect after it is where the address gets attached,
+        # and it must attach to the existing entry, not make a second one.
+        if match is None and adopt:
+            match = next((a for a in accs if not a.get("email")), None)
+    elif accs and adopt:
+        # No address to match on and this is a reconnect, so it is the
+        # account currently active. Guarded by adopt for the same reason
+        # the emailless branch above is, and it is the worse of the two
+        # to get wrong: an ADD that lands here would write the new
+        # account's token straight over the active account's, which
+        # signs you out of an account you never touched.
+        match = next(
+            (a for a in accs if a.get("id") == cfg.get("active_account")),
+            accs[0],
+        )
+
+    if match is None:
+        match = {k: None for k in ACCOUNT_KEYS}
+        match["tasklist_ids"] = []
+        match["tasklist_order"] = []
+        accs.append(match)
+
+    match["email"] = email or match.get("email", "")
+    # len(accs) rather than a counter: accs already includes this entry,
+    # and an id that collides with an existing one would make the two
+    # accounts the same account as far as the switcher is concerned.
+    if not match.get("id"):
+        taken = {a.get("id") for a in accs}
+        n = len(accs)
+        while f"account-{n}" in taken:
+            n += 1
+        match["id"] = f"account-{n}"
+    elif email:
+        match["id"] = email
+    match["refresh_token"] = refresh_token
+
+    # Two entries for one address can exist: an emailless entry that has
+    # just been given its address, and a separate entry already under
+    # that address from a sign-in that did not recognise the two as the
+    # same account. Merge rather than leave both -- a dropdown with the
+    # same address twice is unusable, and whichever one you picked would
+    # be a coin flip. The surviving entry keeps a task selection if it
+    # has one, and inherits the duplicate's if it does not, because an
+    # empty selection means "every list" and would silently widen what
+    # the widget shows.
+    if email and adopt:
+        # The account that was active when this reconnect started, if it
+        # had no address yet. It IS this account -- a reconnect signs
+        # back into the one you are on -- so it is the same duplicate as
+        # the case below, just the half that cannot be spotted by
+        # address. This is how a config carrying both a pre-switcher
+        # entry and a later emailed one heals itself on one reconnect.
+        stale = next((a for a in accs
+                      if a is not match
+                      and not a.get("email")
+                      and a.get("id") == cfg.get("active_account")), None)
+        if stale is not None:
+            for key in ("tasklist_ids", "tasklist_order"):
+                if not match.get(key) and stale.get(key):
+                    match[key] = stale[key]
+            accs.remove(stale)
+
+    if email:
+        for dup in [a for a in accs
+                    if a is not match and a.get("email") == email]:
+            for key in ("tasklist_ids", "tasklist_order"):
+                if not match.get(key) and dup.get(key):
+                    match[key] = dup[key]
+            accs.remove(dup)
+
+    cfg["accounts"] = accs
+    cfg["active_account"] = match["id"]
+    # Lifted to the top level the way load_config does it, so that
+    # save_config folds this sign-in's token back onto this account
+    # rather than onto whichever one happened to be active before.
+    for key in ACCOUNT_KEYS:
+        cfg[key] = match.get(key)
+    return match
 
 # Port 0, unlike anything else that will end up binding a socket here.
 # Desktop-type OAuth clients are the one kind Google lets redirect to any
@@ -159,7 +282,7 @@ def pkce_pair():
     return verifier, challenge
 
 
-def main(argv=None, timeout=None):
+def main(argv=None, timeout=None, add_account=False):
     """argv is the arguments after the subcommand, so that both
     `python google_tasks_setup.py client_secret.json` and
     `DesktopTasks.exe --connect client_secret.json` reach the same place.
@@ -173,7 +296,10 @@ def main(argv=None, timeout=None):
     browser tab without consenting would otherwise leave this function
     spinning on a daemon thread for the life of the process, holding its
     loopback port and blocking the next Reconnect. widget.connect_google
-    passes a generous one."""
+    passes a generous one.
+
+    add_account=True means this sign-in is adding a second account
+    rather than renewing the current one; see remember_account."""
     argv = sys.argv[1:] if argv is None else argv
     client_secret_path = argv[0] if argv else None
     gcfg = credentials(client_secret_path)
@@ -200,7 +326,13 @@ def main(argv=None, timeout=None):
         # agreed, returns an access token only, and reconnecting silently
         # fails to produce the one credential this script exists to get.
         "access_type": "offline",
-        "prompt": "consent",
+        # select_account joined consent when the switcher landed: without
+        # it Google signs you straight back into the account you last
+        # used, so "Add another account" could only ever re-add the one
+        # you already had. With it you get the chooser every time, which
+        # costs a reconnect one extra click and is the only way to reach
+        # a second account at all.
+        "prompt": "consent select_account",
     }
     auth_url = f"{AUTH_URL}?{urllib.parse.urlencode(params)}"
 
@@ -247,6 +379,22 @@ def main(argv=None, timeout=None):
         },
     )
 
+    # Checked before the token is saved, because the alternative is what
+    # it used to do: save it, fetch, and fail with a bare "HTTP Error
+    # 403: Forbidden" from somewhere else entirely. Google hands out a
+    # perfectly good token for a consent screen where "See your tasks"
+    # was unticked -- it simply carries no Tasks scope -- and nothing but
+    # this field says so. A sign-in that cannot read tasks is not a
+    # sign-in, so it is refused here rather than written over the working
+    # account it was meant to replace.
+    granted = set((tokens.get("scope") or "").split())
+    if TASKS_SCOPE not in granted:
+        sys.exit(
+            "That sign-in did not include permission to see your tasks, so "
+            "there is nothing to show. Nothing was saved -- try again, and "
+            "leave every box on Google's consent screen ticked."
+        )
+
     refresh_token = tokens.get("refresh_token")
     if not refresh_token:
         sys.exit(
@@ -254,14 +402,23 @@ def main(argv=None, timeout=None):
             "https://myaccount.google.com/permissions and run setup again."
         )
 
-    gcfg["refresh_token"] = refresh_token
+    # Filed under the account it belongs to. A reconnect of an account
+    # already here replaces its token and keeps its list selection, which
+    # is what makes the weekly re-auth a non-event; a new address is
+    # added alongside and becomes the active one, which is what makes
+    # "Add another account" in the switcher work.
+    account = remember_account(
+        gcfg, email_from_id_token(tokens.get("id_token", "")), refresh_token,
+        adopt=not add_account,
+    )
     # Empty means every list. Left alone on a reconnect so a narrowed
     # selection survives the weekly re-auth that Testing status forces.
     gcfg.setdefault("tasklist_ids", [])
     os.makedirs(CONFIG_DIR, exist_ok=True)
     save_config(gcfg)
 
-    print("\nConnected. Refresh token saved to config/config.json.")
+    who = account.get("email") or "your account"
+    print(f"\nConnected as {who}. Refresh token saved to config/config.json.")
 
     # Proves the credential works before anyone goes looking at a widget for
     # an answer, and leaves a tasks.json on disk to build the UI against.

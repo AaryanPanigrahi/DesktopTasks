@@ -12,6 +12,14 @@ source and frozen alike.
     DesktopTasks.exe --serve      just the HTTP server, for debugging
     DesktopTasks.exe --fetch      one Google Tasks pull, then exit
     DesktopTasks.exe --connect    sign in to Google (first run, reconnect)
+    DesktopTasks.exe --setup      install it, with shortcuts
+    DesktopTasks.exe --uninstall  remove it, its shortcuts and its data
+
+The last two are also selected by the exe's own filename, which is what
+makes a single downloaded file land in setup rather than in a widget
+nobody installed. DesktopTasks-Setup.exe runs setup, Uninstall.exe runs
+the uninstaller, and both are copies of this same binary under another
+name. See looks_like_setup_build.
 
 Imports are deliberately inside each branch. The widget pulls in pywebview,
 pythonnet and the whole .NET interop layer; nothing else here needs any of
@@ -29,6 +37,34 @@ import sys
 
 LOG_NAME = "desktoptasks.log"
 MAX_LOG_BYTES = 512 * 1024
+
+# A name containing either of these means the setup build, so a
+# first-time user who downloads one file and double-clicks it lands in
+# setup rather than in a widget that was never installed.
+SETUP_NAMES = ("setup", "install")
+
+# Checked before SETUP_NAMES, and the reason that check is a function
+# rather than one `in` test: "uninstall" contains "install", so a plain
+# membership test would send the uninstaller into setup.
+UNINSTALL_NAMES = ("uninstall",)
+
+
+def _exe_name():
+    """This program's filename, lowercased. Frozen that is the exe; from
+    source it is this script, which never matches either list, so a
+    checkout only ever reaches these modes through the flags."""
+    return os.path.basename(sys.executable if getattr(sys, "frozen", False)
+                            else __file__).lower()
+
+
+def looks_like_uninstall_build():
+    return any(token in _exe_name() for token in UNINSTALL_NAMES)
+
+
+def looks_like_setup_build():
+    if looks_like_uninstall_build():
+        return False
+    return any(token in _exe_name() for token in SETUP_NAMES)
 
 
 def redirect_output_to_log():
@@ -80,7 +116,12 @@ def main(argv=None):
     if log_path:
         import datetime
 
-        label = mode or "widget"
+        if mode:
+            label = mode
+        elif looks_like_uninstall_build():
+            label = "uninstall"
+        else:
+            label = "setup" if looks_like_setup_build() else "widget"
         print(f"\n=== DesktopTasks {label} "
               f"{datetime.datetime.now().isoformat(timespec='seconds')} ===")
 
@@ -104,7 +145,27 @@ def main(argv=None):
         # way the script does. A release build bundles its own client and
         # needs no argument.
         google_tasks_setup.main(argv[1:])
+    elif mode == "--setup":
+        import setup_app
+
+        return setup_app.main(argv[1:])
+    elif mode == "--uninstall":
+        import uninstall
+
+        return uninstall.main(argv[1:])
     elif mode is None:
+        # No flag, so the filename decides. Uninstall is tested first for
+        # the same reason looks_like_setup_build tests it: one name
+        # contains the other.
+        if looks_like_uninstall_build():
+            import uninstall
+
+            return uninstall.main()
+        if looks_like_setup_build():
+            import setup_app
+
+            return setup_app.main()
+
         import widget
 
         widget.main()

@@ -15,8 +15,10 @@ const $ = id => document.getElementById(id);
 // setting name for the top-level ones; the window block names its own,
 // because "x" is too generic to be an element id.
 const TOGGLES = ['show_completed', 'show_notes', 'group_by_list',
-                 'translucent_background', 'custom_spacing'];
-const NUMBERS = ['fetch_interval_minutes', 'columns', 'max_tasks', 'spacing'];
+                 'translucent_background', 'custom_spacing',
+                 'personalised_lists'];
+const NUMBERS = ['fetch_interval_minutes', 'columns', 'max_tasks', 'spacing',
+                 'column_width', 'max_height'];
 // Kept apart from NUMBERS because these must not be rounded to integers.
 const FLOATS = ['scale', 'opacity'];
 const WIN_TOGGLES = { survive_show_desktop: 'survive_show_desktop', dark_theme: 'dark_theme' };
@@ -105,7 +107,8 @@ function refreshReadouts() {
   const note = $('columns-note');
   if (note && state) {
     const n = Math.max(1, Number($('columns').value) || 1);
-    const shown = chosenIds().length || (state.lists || []).length;
+    const shown = (chosenIds().length || realLists().length)
+                + ($('personalised_lists').checked ? pickedViews().length : 0);
     note.textContent = shown
       ? `${shown} lists across ${n}: ` +
         Array.from({ length: n }, (_, c) =>
@@ -114,10 +117,34 @@ function refreshReadouts() {
   }
 }
 
+// Real Google lists only. These ids go to the fetcher as tasklist_ids,
+// and a built-in view's id there would be a request for a list Google
+// does not have. The views are collected by pickedViews instead.
+function realLists() {
+  return (state ? state.lists || [] : []).filter(l => !l.virtual);
+}
+
+function viewLists() {
+  return (state ? state.lists || [] : []).filter(l => l.virtual);
+}
+
 function chosenIds() {
-  return (state ? state.lists || [] : [])
+  return realLists()
     .filter(l => { const el = $('list_' + l.id); return el && el.checked; })
     .map(l => l.id);
+}
+
+// The views that are on: the master switch and the individual tick. The
+// ids are stored bare, without the "virtual:" prefix they carry in the
+// order, because nothing else shares that namespace.
+// Deliberately not gated on the master switch: switching the feature
+// off must not wipe which views were ticked, or ticking it back on would
+// come back empty. The switch decides whether they are drawn, here and
+// in the widget; this is only which ones.
+function pickedViews() {
+  return viewLists()
+    .filter(l => { const el = $('view_' + l.id); return el && el.checked; })
+    .map(l => l.id.replace(/^virtual:/, ''));
 }
 
 function setMsg(text, kind) {
@@ -294,11 +321,249 @@ for (const btn of document.querySelectorAll('.tab')) {
     for (const p of document.querySelectorAll('.panel')) {
       p.classList.toggle('on', p.dataset.panel === btn.dataset.tab);
     }
+    syncResetButton();
     // A hidden panel has no size to measure, so a panel is packed when
     // it is shown and not before.
     relayout();
   };
 }
+
+// ------------------------------------------------- account switcher
+//
+// One Google account is fetched at a time: the widget's timer pulls the
+// active account only, on the interval set under Fetching. Switching is
+// therefore not a fetch -- it rewrites which account that timer reads
+// and nothing else -- which is why the page then says "Reload
+// recommended" instead of quietly going to the network. Adding an
+// account is the ordinary sign-in flow; Google's account chooser is
+// what picks which one gets added.
+
+// Sentinel option value. Not an id, because an id is an email address
+// and an email address cannot contain a space.
+const ADD_ACCOUNT = '+ add';
+
+// Sticky until the next successful fetch, not until the next redraw:
+// load() runs on every save, and a notice that vanished because you
+// changed an unrelated setting would be lost exactly when it mattered.
+let switched = false;
+
+// The account picked in the dropdown but not yet saved, or null when the
+// box is showing the account the widget is actually on. A switch is a
+// form value like any other now: nothing moves until Save.
+let pendingAccount = null;
+
+// How old what is on screen is, in words, for the switch notice. The
+// point is to make the notice decidable: an hour old is worth a reload,
+// two minutes old plainly is not, and "Reload recommended" on its own
+// cannot tell you which you are looking at.
+function describeAge(s) {
+  if (!s.last_updated) return 'This account has not been fetched yet.';
+  const mins = Math.round((Date.now() - new Date(s.last_updated)) / 60000);
+  if (!isFinite(mins) || mins < 0) return '';
+  if (mins < 1) return 'Fetched just now.';
+  if (mins < 60) return `Last fetched ${mins} minute${mins === 1 ? '' : 's'} ago.`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `Last fetched ${hrs} hour${hrs === 1 ? '' : 's'} ago.`;
+  const days = Math.round(hrs / 24);
+  return `Last fetched ${days} day${days === 1 ? '' : 's'} ago.`;
+}
+
+function accountQuery() {
+  return pendingAccount ? '?account=' + encodeURIComponent(pendingAccount) : '';
+}
+
+// Redraws only the parts of the page that belong to an account: the
+// connection card, the Task lists checkboxes and the Layout order. Used
+// when a switch is picked but not saved, so the settings page shows that
+// account while the widget stays on the current one.
+//
+// Deliberately not load(): that also redraws the appearance controls
+// from disk and clears the dirty flag, which would throw away unsaved
+// edits on the other tabs and the switch itself.
+async function loadAccountView() {
+  let next;
+  try {
+    const res = await fetch('api/state' + accountQuery(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('could not read that account');
+    next = await res.json();
+  } catch (e) {
+    setMsg(e.message, 'bad');
+    return;
+  }
+  // A reply for an account that is no longer the pending one is a race
+  // between two quick picks; drawing it would show the wrong account.
+  if (next.viewing !== (pendingAccount || next.accounts.find(a => a.active)?.id)) return;
+
+  state = next;
+  order = (state.settings.tasklist_order || []).slice();
+  drawConnection(state);
+  drawLists(state);
+  drawOrder();
+  relayout();
+}
+
+function drawAccounts(s) {
+  const accounts = s.accounts || [];
+  const sel = $('account');
+  const row = $('account-row');
+
+  // With no account there is nothing to switch between and the Connect
+  // button is the only thing to do. With one, the switcher is still
+  // worth showing -- it is the only route to "Add another account".
+  row.hidden = !accounts.length;
+  $('remove-account').hidden = !accounts.length;
+  if (!accounts.length) { $('account-flash').hidden = true; return; }
+
+  // The pending pick wins over the saved one: load() runs after every
+  // save and after a reload, and either would otherwise snap the box
+  // back to the account the widget is still on and lose the choice.
+  const active = accounts.find(a => a.active) || accounts[0];
+  const showing = pendingAccount || active.id;
+  sel.replaceChildren(...accounts.map(a => {
+    const opt = document.createElement('option');
+    opt.value = a.id;
+    // "(current)" only while a switch is pending, where it is the one
+    // thing that distinguishes the account you picked from the one the
+    // widget is still on. With nothing pending it is just a word on
+    // every row that is already selected.
+    opt.textContent = a.label +
+      (pendingAccount && a.active ? ' (current)' : '');
+    opt.selected = a.id === showing;
+    return opt;
+  }));
+  const add = document.createElement('option');
+  add.value = ADD_ACCOUNT;
+  add.textContent = 'Add another account...';
+  sel.appendChild(add);
+
+  // Shown while a switch is pending AND after one has been applied but
+  // not yet fetched. Both are the same statement -- what the widget is
+  // drawing is not this account's current tasks -- and both end at the
+  // next fetch. Pending says so in the future tense.
+  const flash = $('account-flash');
+  flash.hidden = !(pendingAccount || switched);
+  $('account-when').textContent = pendingAccount
+    ? 'Save to switch. The widget will show whatever was last pulled ' +
+      'for that account.'
+    : 'This is whatever was last pulled for this account.';
+  $('account-age').textContent = pendingAccount ? '' : describeAge(s);
+  // Shown in both states, with the pending one saying what it will do:
+  // it applies the switch and fetches, which is Save's account half on
+  // its own, for when you want fresh tasks without saving the rest of
+  // the form.
+  $('account-reload').textContent = pendingAccount
+    ? 'Switch and reload' : 'Reload now';
+}
+
+$('account').onchange = () => {
+  const sel = $('account');
+  const id = sel.value;
+  const active = (state.accounts || []).find(a => a.active);
+
+  if (id === ADD_ACCOUNT) {
+    // Put the box back before the sign-in starts: it may be cancelled,
+    // and a dropdown reading "Add another account..." for the next five
+    // minutes is a lie about which account the widget is fetching.
+    sel.value = pendingAccount || (active && active.id) || '';
+    startSignIn(true);
+    return;
+  }
+
+  // Nothing is applied here. The switch is part of the form now, like
+  // every other control on the page: it happens in the Save handler,
+  // after the settings write (so the task selection lands on the
+  // account it was edited for) and before the refresh (so the fetch is
+  // the new account's).
+  pendingAccount = (active && id === active.id) ? null : id;
+  markDirty();
+  // The task lists and the order are that account's, so they follow the
+  // pick immediately -- it is the widget that waits for Save, not the
+  // settings page. Any unsaved tick on the previous account's lists goes
+  // with it, which is the same thing as not having saved it.
+  loadAccountView().then(() => drawAccounts(state));
+};
+
+// Applies the pending switch. Called by Save, between the config write
+// and the refresh; see the comment in $('account').onchange.
+async function applyPendingAccount() {
+  if (!pendingAccount) return;
+  const res = await fetch('api/account', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: pendingAccount }),
+  });
+  const out = await res.json();
+  if (!res.ok || !out.ok) throw new Error(out.error || 'could not switch account');
+  pendingAccount = null;
+  switched = true;
+}
+
+$('remove-account').onclick = async () => {
+  const accounts = state.accounts || [];
+  const active = accounts.find(a => a.active) || accounts[0];
+  // Whatever the dropdown is showing, including a pending pick: the
+  // button sits next to it and "remove" plainly means the one on
+  // screen, not the one the widget happens to be fetching.
+  const id = $('account').value;
+  const target = accounts.find(a => a.id === id) || active;
+  if (!target) return;
+
+  // Immediate and irreversible, so it asks. The sign-in itself is not
+  // revoked -- that is Google's own permissions page -- and saying so
+  // is the difference between this looking destructive and looking
+  // broken when the account signs back in with its old selection gone.
+  const last = accounts.length === 1;
+  const ok = confirm(
+    [`Remove ${target.label}?`,
+     'DesktopTasks forgets its sign-in, its task-list selection and its ' +
+     'saved tasks. ' +
+     (last ? 'It is your only account, so the widget will have nothing to '
+           + 'show until you connect one again.'
+           : 'The widget switches to your other account.'),
+     'You can add it back at any time by signing in again.',
+    ].join('\n\n')
+  );
+  if (!ok) return;
+
+  setMsg('Removing account...');
+  try {
+    const res = await fetch('api/account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: target.id, action: 'remove' }),
+    });
+    const out = await res.json();
+    if (!res.ok || !out.ok) throw new Error(out.error || 'could not remove');
+    pendingAccount = null;
+    switched = false;
+    await load();
+    setMsg(`Removed ${target.label}.`, 'ok');
+  } catch (e) {
+    setMsg(e.message === 'Failed to fetch'
+             ? 'Could not reach the widget.' : e.message, 'bad');
+    await load();
+  }
+};
+
+$('account-reload').onclick = async () => {
+  $('account-reload').disabled = true;
+  setMsg(pendingAccount ? 'Switching and fetching...'
+                        : 'Fetching this account’s tasks...');
+  try {
+    // The switch first, so the fetch below is the account you picked.
+    // This is the one way an account change applies without Save, and
+    // it is explicit: the button says so.
+    await applyPendingAccount();
+    const res = await fetch('refresh', { method: 'POST' });
+    if (!res.ok) throw new Error('the fetch failed');
+    switched = false;
+    await load();
+    setMsg('Tasks reloaded.', 'ok');
+  } catch (e) {
+    setMsg('Could not reload. ' + e.message, 'bad');
+  }
+  $('account-reload').disabled = false;
+};
 
 // ---------------------------------------------------------- drawing
 function drawConnection(s) {
@@ -327,13 +592,19 @@ function drawConnection(s) {
   if (expired || other.length) {
     notice.hidden = false;
     notice.textContent = expired
-      ? 'Google expired this sign-in. Reconnect to start fetching again. The widget is still showing the last tasks it fetched.'
+      ? 'Google expired this sign-in. Reconnect to start fetching again; the widget is still showing the last tasks it fetched.'
       : other[0].error_message;
   } else {
     notice.hidden = true;
   }
 
   $('connect').textContent = s.connected ? 'Reconnect Google' : 'Connect Google';
+  // Only with an account attached. Keyed off `connected` rather than off
+  // `expired`: an expired token still means there is a Google account
+  // whose tasks you might want to go and edit, and tasks.google.com will
+  // ask you to sign in itself if it has to.
+  $('edit-tasks').hidden = !s.connected;
+  drawAccounts(s);
   relayout();            // the notice is a card taller when it is shown
 }
 
@@ -344,8 +615,10 @@ function drawLists(s) {
   // misleading: unticking a list that already looked unticked did
   // nothing, and saving wrote the same empty list straight back.
   const ids = s.settings.tasklist_ids || [];
-  const lists = s.lists || [];
+  const lists = (s.lists || []).filter(l => !l.virtual);
   const chosen = ids.length ? new Set(ids) : new Set(lists.map(l => l.id));
+
+  drawViews(s);
 
   if (!lists.length) {
     box.replaceChildren(Object.assign(document.createElement('div'), {
@@ -368,7 +641,9 @@ function drawLists(s) {
     cb.type = 'checkbox';
     cb.id = 'list_' + list.id;
     cb.checked = chosen.has(list.id);
-    cb.onchange = () => { markDirty(); refreshReadouts(); };
+    // drawOrder as well, so the Layout tab's copy of this list fades or
+    // un-fades with the tick rather than waiting for the next load().
+    cb.onchange = () => { markDirty(); refreshReadouts(); drawOrder(); };
 
     const label = document.createElement('label');
     label.htmlFor = cb.id;
@@ -377,17 +652,52 @@ function drawLists(s) {
 
     const n = document.createElement('span');
     n.className = 'n';
-    // An unticked list has no tasks fetched for it, so its count is 0 and
-    // printing "0 tasks" would read as an empty list rather than an
-    // unfetched one.
-    n.textContent = list.selected === false
-      ? 'Not shown'
-      : list.count === 1 ? '1 task' : list.count + ' tasks';
+    // Every list is fetched now, including the unticked ones -- the
+    // personalised lists read across all of them -- so the count is
+    // real either way and worth printing. Whether the list gets a card
+    // of its own is what the tick says, and the Order card is where
+    // that is spelled out.
+    n.textContent = list.count === 1 ? '1 task' : list.count + ' tasks';
 
     row.append(cb, label, n);
     return row;
   }));
   relayout();            // one row per list, so the card's height is data
+}
+
+// The built-in views, under their own heading in the same card. Ticking
+// one is not a fetch setting -- nothing new is downloaded -- so these go
+// to personalised_ids rather than to tasklist_ids.
+function drawViews(s) {
+  const box = $('views');
+  const on = s.settings.personalised_lists !== false;
+  const picked = new Set(s.settings.personalised_ids || []);
+  box.classList.toggle('off', !on);
+
+  box.replaceChildren(...(s.lists || []).filter(l => l.virtual).map(view => {
+    const bare = view.id.replace(/^virtual:/, '');
+    const row = document.createElement('div');
+    row.className = 'lrow';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.id = 'view_' + view.id;
+    cb.checked = picked.has(bare);
+    cb.onchange = () => { markDirty(); refreshReadouts(); drawOrder(); };
+
+    const label = document.createElement('label');
+    label.htmlFor = cb.id;
+    // textContent for the same reason the real lists use it: the title
+    // may have been renamed around a list the user named.
+    label.textContent = view.title;
+
+    const n = document.createElement('span');
+    n.className = 'n';
+    n.textContent = view.count === 1 ? '1 task' : view.count + ' tasks';
+
+    row.append(cb, label, n);
+    return row;
+  }));
 }
 
 function drawOrder() {
@@ -408,10 +718,33 @@ function drawOrder() {
 
   const columns = Math.max(1, Number($('columns').value) || 1);
 
+  // Read live off the Account tab's checkboxes rather than off the saved
+  // tasklist_ids, so unticking a list fades it here immediately instead of
+  // after a save. A list with no checkbox yet counts as shown, which is
+  // also what an untouched, never-narrowed selection means.
+  const master = $('personalised_lists').checked;
+  const shown = new Set((state.lists || [])
+    .filter(l => {
+      // A view is shown when the master switch and its own tick are both
+      // on. A real list is shown unless its box is there and unticked.
+      if (l.virtual) {
+        const el = $('view_' + l.id);
+        return master && el && el.checked;
+      }
+      const el = $('list_' + l.id);
+      return !el || el.checked;
+    })
+    .map(l => l.id));
+  // Column positions are counted over the shown lists only, because the
+  // widget never deals an unticked list into a column. Counting the faded
+  // rows too would print a column number that the widget disagrees with.
+  let slot = 0;
+
   box.replaceChildren(...order.map((id, i) => {
     const list = byId.get(id);
+    const on = shown.has(id);
     const row = document.createElement('div');
-    row.className = 'orow';
+    row.className = on ? 'orow' : 'orow off';
     row.draggable = true;
     row.dataset.id = id;
 
@@ -425,10 +758,17 @@ function drawOrder() {
 
     // Which column this position lands in, by the same modulus the
     // widget uses. Shown because the mapping is not obvious from a
-    // vertical list.
+    // vertical list. An unticked list lands in no column, so it gets a
+    // badge saying why instead -- the same treatment DesktopCards gives a
+    // hidden account.
     const col = document.createElement('span');
-    col.className = 'col';
-    col.textContent = columns > 1 ? 'col ' + (i % columns + 1) : '';
+    if (on) {
+      col.className = 'col';
+      col.textContent = columns > 1 ? 'col ' + (slot++ % columns + 1) : '';
+    } else {
+      col.className = 'why';
+      col.textContent = 'Not shown';
+    }
 
     const up = document.createElement('button');
     up.className = 'mv'; up.type = 'button'; up.textContent = '\u2191';
@@ -512,6 +852,93 @@ function drawSettings(s) {
   refreshReadouts();
 }
 
+// ------------------------------------------------ Windows shortcuts
+// Not part of collect(): these three are .lnk files, not config.json
+// keys, so they have their own endpoint and their own save step. The
+// ticks still only mean something on Save, like everything else here.
+const SHORTCUTS = { startup: 'sc_startup', start_menu: 'sc_start_menu',
+                    desktop: 'sc_desktop' };
+
+// What the server last told us is actually on disk, which is what a
+// pending tick is compared against.
+let shortcutState = { available: false, startup: false, start_menu: false,
+                      desktop: false, dirs: {} };
+
+function drawShortcuts(s) {
+  shortcutState = s.shortcuts || shortcutState;
+  const dirs = shortcutState.dirs || {};
+  for (const [key, id] of Object.entries(SHORTCUTS)) {
+    $(id).checked = !!shortcutState[key];
+    // Nothing to tick if the calls that write a .lnk are not there.
+    $(id).disabled = !shortcutState.available;
+    const where = $(id + '_dir');
+    if (where) where.textContent = dirs[key] || '';
+  }
+  $('sc_unavailable').hidden = !!shortcutState.available;
+  $('sc_redo').disabled = !shortcutState.available;
+}
+
+// The one place shortcuts are written. Throws, so the caller decides
+// whether a failure is the whole message or half of one.
+async function writeShortcuts() {
+  const res = await fetch('api/shortcuts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(shortcutsWanted()),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok || !out.ok) throw new Error(out.error || 'could not write the shortcuts');
+}
+
+function shortcutsWanted() {
+  return Object.fromEntries(
+    Object.entries(SHORTCUTS).map(([key, id]) => [key, $(id).checked]));
+}
+
+// Only when a tick actually moved. Writing three shortcuts is not work a
+// Save that changed a colour should be doing.
+function shortcutsChanged() {
+  if (!shortcutState.available) return false;
+  const want = shortcutsWanted();
+  return Object.keys(SHORTCUTS).some(key => want[key] !== !!shortcutState[key]);
+}
+
+// Save is the only other way these are written. Nothing here acts on a
+// tick as it is clicked, so a stray click is still undone by leaving the
+// page alone.
+$('sc_redo').onclick = async () => {
+  const btn = $('sc_redo');
+  btn.disabled = true;
+  setMsg('Writing shortcuts...');
+  try {
+    await writeShortcuts();
+    setMsg('Shortcuts updated.', 'ok');
+  } catch (e) {
+    setMsg(e.message === 'Failed to fetch'
+             ? 'Could not reach the widget.' : e.message, 'bad');
+  }
+  // Back to what is really on disk, which is also what makes the next
+  // Save see the ticks as unchanged. Only the one card is redrawn: a
+  // full load() here would throw away pending edits elsewhere on the
+  // tab, which this button never asked to touch.
+  await refreshShortcuts();
+  // Explicitly, not only through drawShortcuts: a read that failed
+  // leaves the card untouched, and a button stuck disabled would be the
+  // one state with no way out of it.
+  btn.disabled = !shortcutState.available;
+};
+
+// Re-reads just the shortcut half of the state. Quietly leaves the card
+// as it is if the read fails, since the message already says what
+// happened.
+async function refreshShortcuts() {
+  try {
+    const res = await fetch('api/state' + accountQuery(), { cache: 'no-store' });
+    if (!res.ok) return;
+    drawShortcuts(await res.json());
+  } catch (e) { /* the card keeps what it has */ }
+}
+
 function updateAccentHint(accent) {
   const clear = $('accent_clear');
   clear.disabled = !accent;
@@ -536,7 +963,11 @@ function collect() {
   // as "every list". It also means a list created later shows up on its
   // own instead of being silently excluded by a stale selection.
   const picked = chosenIds();
-  patch.tasklist_ids = picked.length === (state.lists || []).length ? [] : picked;
+  patch.tasklist_ids = picked.length === realLists().length ? [] : picked;
+  // The views are stored as an explicit list, with no "empty means all"
+  // shorthand: none ticked is a real choice here, and the master switch
+  // is what means "all of this off".
+  patch.personalised_ids = pickedViews();
 
   return patch;
 }
@@ -554,6 +985,15 @@ for (const name of [...TOGGLES, ...NUMBERS, ...FLOATS, ...Object.keys(SIDES)]) {
 // The custom-spacing switch shows and hides the four boxes, so it has to
 // redraw as well as mark dirty.
 $('custom_spacing').onchange = () => { markDirty(); refreshReadouts(); };
+
+// The master switch fades its own rows and takes every view out of the
+// Order, so it redraws both.
+$('personalised_lists').onchange = () => {
+  markDirty();
+  $('views').classList.toggle('off', !$('personalised_lists').checked);
+  refreshReadouts();
+  drawOrder();
+};
 
 // Sliders update their readout while being dragged, not only on release.
 for (const id of Object.keys(SLIDERS)) {
@@ -589,11 +1029,15 @@ function syncFromBox(id, snap) {
   afterSlider(id);
 }
 for (const id of [...Object.values(WIN_TOGGLES), ...Object.values(WIN_NUMBERS)]) $(id).onchange = markDirty;
+for (const id of Object.values(SHORTCUTS)) $(id).onchange = markDirty;
 
 // ----------------------------------------------------------- actions
 async function load() {
   try {
-    const res = await fetch('api/state', { cache: 'no-store' });
+    // The pending account, if one is picked: the page describes the
+    // account you are about to switch to, while the widget carries on
+    // with the one you are still on.
+    const res = await fetch('api/state' + accountQuery(), { cache: 'no-store' });
     if (!res.ok) throw new Error('could not read settings');
     state = await res.json();
   } catch (e) {
@@ -605,6 +1049,7 @@ async function load() {
   drawConnection(state);
   drawLists(state);
   drawSettings(state);
+  drawShortcuts(state);
   drawOrder();
   dirty = false;
   $('save').disabled = true;
@@ -615,6 +1060,12 @@ $('save').onclick = async () => {
   $('save').disabled = true;
   setMsg('Saving...');
   try {
+    // The switch goes FIRST, because the Task lists and Order cards are
+    // already showing the pending account -- the selection about to be
+    // written is that account's, so that account has to be the active
+    // one before apply_settings folds it onto an account entry.
+    await applyPendingAccount();
+
     const res = await fetch('api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -624,6 +1075,21 @@ $('save').onclick = async () => {
     if (!res.ok || !out.ok) throw new Error(out.error || 'save failed');
     dirty = false;
 
+    // After the settings, and never instead of them: a shortcut that
+    // will not write should not cost someone the save they came for.
+    // The message says which half failed, and the state reload below
+    // puts the ticks back to what is really on disk.
+    if (shortcutsChanged()) {
+      setMsg('Saved. Writing shortcuts...');
+      try {
+        await writeShortcuts();
+      } catch (e) {
+        setMsg('Settings saved, but the shortcuts failed: ' + e.message, 'bad');
+        await load();
+        return;
+      }
+    }
+
     // Refetch straight away. Which lists are fetched is itself a setting,
     // so saving a new selection and leaving tasks.json alone would leave
     // the widget drawing lists that are no longer chosen until something
@@ -632,41 +1098,99 @@ $('save').onclick = async () => {
     setMsg('Saved. Refreshing the widget...');
     try {
       await fetch('refresh', { method: 'POST' });
+      // That fetch used the active account -- the newly switched one if
+      // this save switched -- so what the widget shows is now current,
+      // which is the condition the reload notice was waiting on. Left
+      // standing if the fetch throws, because it would then be true.
+      switched = false;
     } catch (e) {
       // The save landed, which is the part that matters.
     }
     setMsg('Saved.', 'ok');
-    await // Packed once before the first fetch too: if the widget cannot be
-// reached, the page still has to lay itself out around the error.
-relayout();
-load();
+    await load();
   } catch (e) {
     setMsg(e.message, 'bad');
     $('save').disabled = false;
   }
 };
 
-$('reload').onclick = async () => {
-  setMsg('Reloading...');
+// Reloading is no longer a button: every Save reloads the widget, which
+// is what the button was mostly used for. What a save cannot do is pick
+// up a change that only takes effect at launch -- the window position and
+// corner radius -- so the button that remains is the stronger one.
+$('restart').onclick = async () => {
+  setMsg('Restarting the widget...');
   try {
-    // The same endpoint the tray's Reload uses, so there is one path.
-    const res = await fetch('refresh', { method: 'POST' });
-    setMsg(res.ok ? 'Widget reloaded.' : 'Reloaded, but the fetch failed.',
-           res.ok ? 'ok' : 'bad');
+    const res = await fetch('restart', { method: 'POST' });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok || !out.ok) throw new Error(out.error || 'could not restart');
+    // The restart tears down the server that just answered, so the new
+    // one needs a moment to bind the port before load() can reach it.
+    setMsg('Restarting...');
+    setTimeout(() => load().then(() => setMsg('Widget restarted.', 'ok')), 2500);
   } catch (e) {
-    setMsg('Could not reach the widget.', 'bad');
+    setMsg(e.message === 'Failed to fetch'
+             ? 'Could not reach the widget.' : e.message, 'bad');
   }
-  await // Packed once before the first fetch too: if the widget cannot be
-// reached, the page still has to lay itself out around the error.
-relayout();
-load();
 };
 
-$('connect').onclick = async () => {
+// ------------------------------------------------- reset to default
+// Appearance only, and only the controls on that tab. Resetting the
+// account or the task selection from a button labelled "Reset to
+// default" would be a nasty surprise, so this list is written out by
+// hand rather than derived from everything the page can write.
+const APPEARANCE_DEFAULTS = {
+  scale: 1.0,
+  spacing: 0,
+  custom_spacing: false,
+  spacing_left: 0, spacing_top: 0, spacing_right: 0, spacing_bottom: 0,
+  column_width: 325,
+  max_height: 0,
+  opacity: 1.0,
+  translucent_background: false,
+  corner_radius: 16,
+  dark_theme: true,
+  survive_show_desktop: true,
+};
+
+// Only on Appearance. Hidden rather than disabled: a button that cannot
+// do anything on this tab is better not shown at all.
+function syncResetButton() {
+  const panel = document.querySelector('.panel.on');
+  $('reset').hidden = !panel || panel.dataset.panel !== 'appearance';
+}
+
+$('reset').onclick = () => {
+  for (const [id, value] of Object.entries(APPEARANCE_DEFAULTS)) {
+    const el = $(id);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = value;
+    else el.value = value;
+  }
+  // The accent is not in the table above because "default" for it is the
+  // Windows accent, which is null rather than a colour the picker holds.
+  accentValue = null;
+  updateAccentHint(null);
+  // Position is left alone on purpose: it is where the user dragged the
+  // widget to, not part of its look.
+  refreshReadouts();
+  markDirty();
+  setMsg('Appearance reset. Save to apply.');
+};
+
+// add=true tells the widget this sign-in is meant to attach a second
+// account rather than renew the current one. The two look identical from
+// Google's side, and only the page knows which button was pressed.
+async function startSignIn(add) {
   $('connect').disabled = true;
-  setMsg('Opening Google sign-in. Finish it in the new tab.');
+  setMsg(add ? 'Pick the account to add in the new tab.'
+             : 'Opening Google sign-in. Finish it in the new tab.');
   try {
-    const res = await fetch('api/connect', { method: 'POST' });
+    const res = await fetch('api/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ add: !!add }),
+    });
     const out = await res.json();
     if (!res.ok || !out.ok) throw new Error(out.error || 'could not start sign-in');
     pollForConnection();
@@ -674,7 +1198,9 @@ $('connect').onclick = async () => {
     setMsg(e.message, 'bad');
     $('connect').disabled = false;
   }
-};
+}
+
+$('connect').onclick = () => startSignIn(false);
 
 // The sign-in finishes in another tab, so there is no callback to wait
 // on. Poll /api/state until the widget reports a working connection, or
@@ -694,21 +1220,19 @@ function pollForConnection() {
       if (status.state === 'ok') {
         clearInterval(tick);
         $('connect').disabled = false;
+        // The sign-in ends by fetching, and the account it signed into
+        // is the active one, so there is nothing stale left to warn
+        // about even if the sign-in was reached from "Add account".
+        switched = false;
         setMsg(status.message || 'Connected.', 'ok');
-        await // Packed once before the first fetch too: if the widget cannot be
-// reached, the page still has to lay itself out around the error.
-relayout();
-load();
+        await load();
         return;
       }
       if (status.state === 'failed') {
         clearInterval(tick);
         $('connect').disabled = false;
         setMsg(status.message || 'Sign-in did not finish.', 'bad');
-        await // Packed once before the first fetch too: if the widget cannot be
-// reached, the page still has to lay itself out around the error.
-relayout();
-load();
+        await load();
         return;
       }
     } catch (e) {
@@ -729,6 +1253,7 @@ window.addEventListener('beforeunload', e => {
   e.returnValue = '';
 });
 
+syncResetButton();
 // Packed once before the first fetch too: if the widget cannot be
 // reached, the page still has to lay itself out around the error.
 relayout();
