@@ -535,9 +535,12 @@ def _main():
     total = sum(len(lst["tasks"]) for lst in lists)
     shown = sum(1 for lst in lists if lst["selected"])
     data = write_tasks(lists, [], account_id)
+    # TASKS_PATH, not a written-out "config/tasks.json": frozen, that
+    # file is in %LOCALAPPDATA%, and a log line naming the source path
+    # is how an installed run gets mistaken for a checkout run.
     print(
         f"Wrote {total} tasks across {shown} of {len(lists)} lists to "
-        f"config/tasks.json"
+        f"{TASKS_PATH}"
     )
     return data
 

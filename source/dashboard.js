@@ -428,7 +428,7 @@ function renderList(list, today, { titled }) {
 // useful about -- which matters more here than in DesktopCards, because a
 // pinned page cannot offer a button and the tray is the only way out.
 const RECOVERY = {
-  AUTH_EXPIRED: 'Tray icon → Modify → Reconnect Google. Tasks below are from the last successful fetch.',
+  AUTH_EXPIRED: 'Tray icon > Modify > Reconnect Google. Tasks below are from the last successful fetch.',
   FETCH_FAILED: 'Retrying at the next refresh. Tasks below are from the last successful fetch.',
   // Not a code the fetcher emits -- this page's own state for "tasks.json
   // isn't there at all", which is a first launch before the first fetch

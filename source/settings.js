@@ -548,7 +548,7 @@ $('remove-account').onclick = async () => {
 $('account-reload').onclick = async () => {
   $('account-reload').disabled = true;
   setMsg(pendingAccount ? 'Switching and fetching...'
-                        : 'Fetching this account’s tasks...');
+                        : 'Fetching this account\'s tasks...');
   try {
     // The switch first, so the fetch below is the account you picked.
     // This is the one way an account change applies without Save, and
@@ -874,6 +874,15 @@ function drawShortcuts(s) {
     const where = $(id + '_dir');
     if (where) where.textContent = dirs[key] || '';
   }
+  // Which copy of the app these shortcuts would start. Worth saying,
+  // because a machine can hold an installed build and a checkout at the
+  // same time, and only the one serving this page gets written here.
+  const target = shortcutState.target;
+  $('sc_target').textContent = target
+    ? (shortcutState.frozen
+         ? 'They start the installed app: ' + target
+         : 'They start this checkout: ' + target)
+    : '';
   $('sc_unavailable').hidden = !!shortcutState.available;
   $('sc_redo').disabled = !shortcutState.available;
 }

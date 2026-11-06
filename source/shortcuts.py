@@ -45,6 +45,20 @@ def available():
     return native is not None
 
 
+def launch_exe():
+    """(target, arguments, working_dir) for a shortcut, without the icon.
+
+    Split out of launch_target because reading the state of the three
+    shortcuts must not rebuild the cached .ico, which is Pillow work on
+    every settings-page load for an answer nobody asked for."""
+    if FROZEN:
+        exe = (INSTALLED_EXE_PATH if os.path.exists(INSTALLED_EXE_PATH)
+               else sys.executable)
+        return exe, "", os.path.dirname(exe)
+    pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+    return pythonw, "desktoptasks.py", ASSET_DIR
+
+
 def launch_target():
     """(target, arguments, icon, working_dir) for a shortcut.
 
@@ -72,12 +86,8 @@ def launch_target():
         print(f"[shortcuts] no icon: {e}")
         icon = None
 
-    if FROZEN:
-        exe = (INSTALLED_EXE_PATH if os.path.exists(INSTALLED_EXE_PATH)
-               else sys.executable)
-        return exe, "", icon, os.path.dirname(exe)
-    pythonw = sys.executable.replace("python.exe", "pythonw.exe")
-    return pythonw, "desktoptasks.py", icon, ASSET_DIR
+    exe, args, working_dir = launch_exe()
+    return exe, args, icon, working_dir
 
 
 def paths():
@@ -99,21 +109,29 @@ def state():
     then disagree with the only thing that actually matters."""
     if not available():
         return {"available": False, "startup": False, "start_menu": False,
-                "desktop": False, "dirs": {}}
+                "desktop": False, "dirs": {}, "target": None, "frozen": FROZEN}
 
     try:
         where = paths()
+        exe, args, _ = launch_exe()
         return {
             "available": True,
             "startup": os.path.exists(where["startup"]),
             "start_menu": os.path.exists(where["start_menu"]),
             "desktop": os.path.exists(where["desktop"]),
             "dirs": {key: os.path.dirname(path) for key, path in where.items()},
+            # What a shortcut written now would point at. Sent because the
+            # answer depends on which copy of the app is serving this page:
+            # an installed build points at the installed exe, a checkout at
+            # pythonw plus the script. Someone with both on one machine
+            # cannot otherwise tell which one their shortcuts start.
+            "target": (exe + " " + args).strip(),
+            "frozen": FROZEN,
         }
     except Exception as e:
         print(f"[shortcuts] could not read the shortcut state: {e}")
         return {"available": False, "startup": False, "start_menu": False,
-                "desktop": False, "dirs": {}}
+                "desktop": False, "dirs": {}, "target": None, "frozen": FROZEN}
 
 
 def apply(wanted):

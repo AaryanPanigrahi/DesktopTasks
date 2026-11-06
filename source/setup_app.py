@@ -134,18 +134,28 @@ def install_binary():
         return None, False
     if os.path.abspath(sys.executable) == os.path.abspath(INSTALLED_EXE_PATH):
         return INSTALLED_EXE_PATH, False
-    try:
-        shutil.copy2(sys.executable, INSTALLED_EXE_PATH)
-        return INSTALLED_EXE_PATH, True
-    except OSError:
-        # In use means a widget is still holding it. The binary is
-        # demonstrably already installed, so keep it and carry on to the
-        # shortcuts, which is what the caller actually came for. Only a
-        # missing target makes this fatal.
-        if os.path.exists(INSTALLED_EXE_PATH):
-            print(f"[setup] {INSTALLED_EXE_PATH} is in use; keeping it")
-            return INSTALLED_EXE_PATH, False
-        raise
+
+    # Retried, because a widget stops answering on its port before the
+    # process is actually gone, and Windows holds the running image open
+    # until it is. Without the retry a reinstall over a widget that was
+    # mid-exit would quietly keep the old binary and report success.
+    last = None
+    for attempt in range(6):
+        try:
+            shutil.copy2(sys.executable, INSTALLED_EXE_PATH)
+            return INSTALLED_EXE_PATH, True
+        except OSError as e:
+            last = e
+            time.sleep(0.5)
+
+    # Still in use. The binary is demonstrably already installed, so keep
+    # it and carry on to the shortcuts, which is what the caller actually
+    # came for. Only a missing target makes this fatal.
+    if os.path.exists(INSTALLED_EXE_PATH):
+        print(f"[setup] {INSTALLED_EXE_PATH} is in use, keeping the "
+              f"installed copy: {last}")
+        return INSTALLED_EXE_PATH, False
+    raise last
 
 
 def seed_data_dir():

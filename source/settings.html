@@ -493,7 +493,7 @@
            whole message is "these tasks are the wrong account's", and
            the only useful response to it is one fetch. -->
       <p class="flash" id="account-flash" hidden>
-        <span>Reload recommended<span class="star">*</span> —
+        <span>Reload recommended<span class="star">*</span>:
           <span id="account-when"></span>
           <span id="account-age"></span></span>
         <button class="act" id="account-reload" type="button">Reload now</button>
@@ -517,8 +517,8 @@
       </div>
       <p class="hint" id="connect-hint" style="margin-top:10px;margin-bottom:0">
         Opens Google's sign-in in a new tab. Leave every consent box
-        ticked &mdash; without <b>See your tasks</b> the sign-in cannot
-        read anything, and the widget only finds out on the next fetch.
+        ticked. Without <b>See your tasks</b> the sign-in cannot read
+        anything, and the widget only finds out on the next fetch.
       </p>
     </div>
 
@@ -610,8 +610,8 @@
         <span class="lab">
           <b>Maximum tasks shown</b>
           <span>
-            0 draws everything, which a long list runs off the bottom of
-            the screen with &mdash; a pinned window cannot scroll.
+            0 draws everything, and a long list then runs off the bottom of
+            the screen, because a pinned window cannot scroll.
             Whatever is left out is counted at the bottom.
           </span>
         </span>
@@ -799,6 +799,7 @@
         Where DesktopTasks can be started from. Ticking one writes a
         shortcut; unticking it deletes the shortcut and nothing else.
       </p>
+      <p class="hint" id="sc_target"></p>
       <p class="hint" id="sc_unavailable" hidden>
         Shortcuts need Windows, and this copy could not reach the
         Windows calls that write them.

@@ -34,6 +34,7 @@ from google_tasks import (
     ACCOUNT_KEYS,
     TASKS_SCOPE,
     CONFIG_DIR,
+    CONFIG_PATH,
     LOOPBACK,
     SCOPE,
     TOKEN_URL,
@@ -208,7 +209,7 @@ def credentials(client_secret_path=None):
             "does not, so supply your own -- either pass the client secret "
             "JSON from the Cloud console:\n"
             "    python google_tasks_setup.py client_secret.json\n"
-            "or set client_id/client_secret in config/config.json. See "
+            f"or set client_id/client_secret in {CONFIG_PATH}. See "
             "source/oauth_client.example.py."
         )
     return gcfg
@@ -418,7 +419,7 @@ def main(argv=None, timeout=None, add_account=False):
     save_config(gcfg)
 
     who = account.get("email") or "your account"
-    print(f"\nConnected as {who}. Refresh token saved to config/config.json.")
+    print(f"\nConnected as {who}. Refresh token saved to {CONFIG_PATH}.")
 
     # Proves the credential works before anyone goes looking at a widget for
     # an answer, and leaves a tasks.json on disk to build the UI against.

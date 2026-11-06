@@ -141,14 +141,18 @@ def stop_running_app(port):
 def remove_shortcuts():
     """The Start-menu entry, the Startup one and the desktop one. All
     three are files, and all three are optional: only the ones actually
-    there get removed."""
+    there get removed.
+
+    Reported by which one it was rather than by filename. All three are
+    called DesktopTasks.lnk, so a list of basenames reads as the same
+    name twice and says nothing about what was removed."""
     n = native()
     gone = []
-    for path in (n.start_menu_path(APP_NAME),
-                 n.autostart_path(APP_NAME),
-                 n.desktop_path(APP_NAME)):
+    for label, path in (("Start menu", n.start_menu_path(APP_NAME)),
+                        ("Startup", n.autostart_path(APP_NAME)),
+                        ("Desktop", n.desktop_path(APP_NAME))):
         if os.path.exists(path) and n.remove_shortcut(path):
-            gone.append(os.path.basename(path))
+            gone.append(label)
     print(f"[uninstall] shortcuts removed: {gone or 'none found'}")
     return gone
 
@@ -157,41 +161,77 @@ def remove_data(keep_settings):
     """Everything under DATA_DIR except the exes, which have to outlive
     this process by a few seconds.
 
-    Returns the files that were kept, so the closing message can say so
-    rather than guess."""
+    Returns (kept, deferred): the files kept on purpose, and the ones
+    Windows would not let go of, which the caller hands to
+    delete_after_exit along with the exes. Nothing is simply abandoned,
+    because a file left behind here is the difference between an
+    uninstall that removed the folder and one that left an account
+    sitting in it."""
+    deferred = []
+
+    def drop(path):
+        if not _unlink(path) and os.path.exists(path):
+            deferred.append(path)
+
     # The last fetch and the log go either way. Both are rebuilt, and
     # neither is anything anyone would want back.
-    for path in (TASKS_PATH, LOG_PATH):
-        _unlink(path)
+    #
+    # The log is always deferred, never retried: this process writes its
+    # own progress into it (see desktoptasks.redirect_output_to_log), so
+    # the handle holding it open is ours and cannot be waited out.
+    drop(TASKS_PATH)
     for path in sorted(glob.glob(os.path.join(DATA_DIR, "tasks.*.json"))):
-        _unlink(path)
+        drop(path)
     # The cached .ico and tray png, which are derived from logo.png.
     for path in sorted(glob.glob(os.path.join(CACHE_DIR, "*"))):
-        _unlink(path)
+        drop(path)
+
+    kept = [os.path.basename(p) for p in keepable_paths()]
+    if keep_settings:
+        print(f"[uninstall] keeping {kept}")
+    else:
+        for path in keepable_paths():
+            drop(path)
+        kept = []
+
+    if os.path.exists(LOG_PATH):
+        deferred.append(LOG_PATH)
+
+    # Last, so it only goes once whatever was in it has. Plain rmdir, so
+    # a folder still holding something stays.
     try:
         os.rmdir(CACHE_DIR)
     except OSError:
         pass
 
-    kept = [os.path.basename(p) for p in keepable_paths()]
-    if keep_settings:
-        print(f"[uninstall] keeping {kept}")
-        return kept
-    for path in keepable_paths():
-        _unlink(path)
-    return []
+    if deferred:
+        print(f"[uninstall] deferred to after exit: "
+              f"{[os.path.basename(p) for p in deferred]}")
+    return kept, deferred
 
 
-def _unlink(path):
-    try:
-        os.remove(path)
-        print(f"[uninstall] removed {path}")
-        return True
-    except FileNotFoundError:
-        return False
-    except OSError as e:
-        print(f"[uninstall] could not remove {path}: {e}")
-        return False
+def _unlink(path, attempts=6, delay=0.5):
+    """Deletes a file, retrying while something still holds it open.
+
+    The retry is the whole point. The widget is asked to quit before any
+    of this runs, but it stops answering on its port before the process
+    is actually gone, and on the way out it can still write config.json.
+    A single attempt lost that race and left the account file behind on
+    an uninstall that was told not to keep it."""
+    last = None
+    for attempt in range(attempts):
+        try:
+            os.remove(path)
+            print(f"[uninstall] removed {path}")
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError as e:
+            last = e
+            if attempt < attempts - 1:
+                time.sleep(delay)
+    print(f"[uninstall] still locked, deferring {path}: {last}")
+    return False
 
 
 def main(argv=None):
@@ -224,7 +264,7 @@ def main(argv=None):
     stop_running_app(port)
     remove_shortcuts()
     n.unregister_uninstaller(APP_NAME)
-    kept = remove_data(keep_settings)
+    kept, deferred = remove_data(keep_settings)
 
     # The exes last, and from outside: this process *is* one of them when
     # run as the installed Uninstall.exe. DATA_DIR goes too, but only
@@ -233,8 +273,12 @@ def main(argv=None):
     if FROZEN:
         doomed = [p for p in (INSTALLED_EXE_PATH, UNINSTALL_EXE_PATH)
                   if os.path.exists(p)]
-        n.delete_after_exit(doomed or [os.path.abspath(sys.executable)],
+        n.delete_after_exit(deferred + (doomed or [os.path.abspath(sys.executable)]),
                             directories=[DATA_DIR])
+    elif deferred:
+        # From source there are no exes to remove, but the log is still
+        # ours and still open, so the same deferred delete applies.
+        n.delete_after_exit(deferred)
     else:
         # From source there is nothing installed to delete, and deleting
         # the checkout would be absurd. The shortcuts, the registry entry

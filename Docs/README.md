@@ -130,7 +130,7 @@ at the repo root. Paths are given bare for readability.
 | File | Role |
 |---|---|
 | `desktoptasks.py` | The entry point. Every mode is a flag on this one file. Also redirects `stdout`/`stderr` to a log when there's no console. See [No console](#no-console-so-output-goes-to-a-file). |
-| `google_tasks.py` | The fetcher. Refresh token → access token, list the task lists, list open tasks in each, write `tasks.json`. One pass and exit, no loop. The only module that talks to Google's API. Also owns the accounts model: which account is active, and the per-account task shelves. Stdlib only. |
+| `google_tasks.py` | The fetcher. Refresh token to access token, list the task lists, list open tasks in each, write `tasks.json`. One pass and exit, no loop. The only module that talks to Google's API. Also owns the accounts model: which account is active, and the per-account task shelves. Stdlib only. |
 | `google_tasks_setup.py` | The consent flow. Starts a loopback listener, opens Google's own consent page, catches the redirect, refuses a sign-in that did not grant the Tasks scope, and files the refresh token under the account's email address. Run again to reconnect, or with `add_account` to add a second one. Stdlib only. |
 | `oauth_client.py` | The OAuth client a release signs in with. **Gitignored**, bundled into the exe at build time. See [The OAuth client](#the-oauth-client-shipped-with-the-app-never-committed). |
 | `oauth_client.example.py` | The tracked template of the above, with `None` values and instructions for making your own client. |
@@ -1073,7 +1073,7 @@ a region from the old size would clip a slice off the new one.
 |---|---|
 | A list with no open tasks | **All clear**: a success, not a failure |
 | No lists at all | **No task lists**: nothing connected or nothing selected, which is different from being done |
-| `AUTH_EXPIRED` | The message, plus *"Tray icon → Modify → Reconnect Google. Tasks below are from the last successful fetch."* |
+| `AUTH_EXPIRED` | The message, plus *"Tray icon > Modify > Reconnect Google. Tasks below are from the last successful fetch."* |
 | `FETCH_FAILED` | The message, plus *"Retrying at the next refresh."* Same promise about the tasks below. |
 | No `tasks.json` at all | **No tasks yet**, plus *"Waiting for the first fetch."* |
 
@@ -1173,7 +1173,7 @@ python source/build.py
 Produces `dist/DesktopTasks.exe`, about 31 MB, carrying Python and every
 dependency, so it runs on a machine with no Python installed, plus
 `dist/DesktopTasks-Setup.exe` beside it. Unsigned, so the first run trips
-SmartScreen (**More info → Run anyway**).
+SmartScreen (**More info**, then **Run anyway**).
 
 `build.py` runs a preflight, regenerates the icon, calls PyInstaller
 against `DesktopTasks.spec` from the repo root so `dist/` and `build/`
@@ -1262,7 +1262,7 @@ useful, which is worse for the person who just downloaded it.
    is not a choice; Startup is the dialog's one tick box; the desktop one
    is left alone here and lives on the settings page.
 5. Copies `Uninstall.exe` beside the app and registers it in HKCU, so the
-   app appears in **Settings → Apps** with a working Uninstall button.
+   app appears in **Settings > Apps** with a working Uninstall button.
 6. Launches the widget.
 
 It is one native dialog, not a wizard. DesktopCards needs five steps
@@ -1274,6 +1274,38 @@ pywebview, no Flask and no PIL, and the widget takes it from there.
 Nothing needs administrator: the app and its data are under
 `%LOCALAPPDATA%`, the shortcuts under `%APPDATA%`, the Add/Remove entry in
 `HKCU`.
+
+### A checkout and an installed copy on one machine
+
+Installing from a checkout you also run leaves two separate copies of the
+app, and they share nothing:
+
+| | Checkout | Installed |
+|---|---|---|
+| Data | `config/` | `%LOCALAPPDATA%\DesktopTasks\` |
+| Sign-in, list selection, appearance | its own | its own |
+| Log | `config/desktoptasks.log` | `%LOCALAPPDATA%\DesktopTasks\desktoptasks.log` |
+
+So the installed copy asks you to connect Google even though the checkout
+is already signed in. That is `DATA_DIR` doing its job rather than a bug:
+see [Where your files live](#where-your-files-live).
+
+**Only one of them runs at a time.** `claim_single_instance` takes
+`Local\DesktopTasks_instance`, which is scoped to the login session and
+not to the binary, so whichever starts second logs `Already running` and
+exits. It is not a port clash, and it is why installing asks the running
+widget to quit first.
+
+**The shortcuts belong to whichever copy wrote them.** `launch_exe`
+resolves the target from the process that is serving the settings page: an
+installed build writes the installed exe, a checkout writes `pythonw.exe
+desktoptasks.py`. Both are correct, and neither can know about the other,
+so the Windows shortcuts card prints the target it would write.
+
+The two logs are the easiest thing to mix up, since they have the same
+name and the same format. The fetch line prints `TASKS_PATH` in full for
+that reason: a message reading `config/tasks.json` in the installed log
+would describe a file that is not the one it wrote.
 
 ### What uninstall removes
 
@@ -1303,7 +1335,7 @@ signs this computer out and nothing more.
 `source/version_info.txt` is compiled into the exe by the spec's
 `version=`. Without it the binary has an icon but no name, and Windows
 reads `FileDescription` wherever it has to name a program it did not
-launch itself: Task Manager's **Startup** tab, **Settings → Apps →
+launch itself: Task Manager's **Startup** tab, **Settings > Apps >
 Startup**, the file's Details tab.
 
 The icon in those lists comes from the exe too. That is why a Startup
